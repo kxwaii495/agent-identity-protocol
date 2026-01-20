@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run tests before release
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: go test -v ./...
 
       - name: Run GoReleaser

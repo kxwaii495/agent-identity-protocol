@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Build
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: make build
 
       - name: Verify binary exists
@@ -55,7 +55,7 @@ jobs:
           cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run tests
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
@@ -79,11 +79,11 @@ jobs:
           cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run go vet
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: go vet ./...
 
       - name: Check formatting
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: |
           if [ -n "$(gofmt -l .)" ]; then
             echo "Code is not formatted. Run 'gofmt -w .'"
@@ -95,7 +95,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-          working-directory: proxy
+          working-directory: implementations/go-proxy
           args: --timeout=5m
 
   security:
@@ -112,7 +112,7 @@ jobs:
           cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run govulncheck
-        working-directory: proxy
+        working-directory: implementations/go-proxy
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
