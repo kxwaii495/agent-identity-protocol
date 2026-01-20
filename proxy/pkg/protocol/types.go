@@ -234,6 +234,25 @@ func NewUserTimeoutError(requestID json.RawMessage, toolName string) *Response {
 	}
 }
 
+// NewRateLimitedError creates a JSON-RPC error response for rate limit exceeded.
+//
+// This is used when a tool call exceeds its configured rate limit.
+// The agent should back off and retry later.
+func NewRateLimitedError(requestID json.RawMessage, toolName string) *Response {
+	return &Response{
+		JSONRPC: "2.0",
+		ID:      requestID,
+		Error: &Error{
+			Code:    ErrCodeRateLimited,
+			Message: "Rate limit exceeded",
+			Data: map[string]string{
+				"tool":   toolName,
+				"reason": "Rate limit exceeded for " + toolName + ". Try again later.",
+			},
+		},
+	}
+}
+
 // IsToolCall checks if a request is a tool invocation that needs policy checking.
 func (r *Request) IsToolCall() bool {
 	return r.Method == "tools/call"
