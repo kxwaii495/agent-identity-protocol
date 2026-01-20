@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/gen2brain/dlgs"
@@ -35,6 +36,14 @@ import (
 // DefaultTimeout is the default duration to wait for user response.
 // After this duration, the request is automatically denied.
 const DefaultTimeout = 60 * time.Second
+
+// DefaultMaxPromptsPerMinute is the default rate limit for approval prompts.
+// If more than this many prompts are requested in a minute, subsequent
+// requests are auto-denied to prevent approval fatigue attacks.
+const DefaultMaxPromptsPerMinute = 10
+
+// DefaultCooldownDuration is how long to auto-deny after rate limit is hit.
+const DefaultCooldownDuration = 5 * time.Minute
 
 // PrompterConfig holds configuration for the user prompt system.
 type PrompterConfig struct {
@@ -45,14 +54,39 @@ type PrompterConfig struct {
 	// Title is the dialog window title.
 	// Default: "AIP Security Alert"
 	Title string
+
+	// MaxPromptsPerMinute limits how many approval prompts can be shown per minute.
+	// This prevents "approval fatigue" attacks where an agent floods the user
+	// with prompts until they reflexively click "Approve".
+	// Default: 10. Set to 0 to disable rate limiting.
+	MaxPromptsPerMinute int
+
+	// CooldownDuration is how long to auto-deny requests after the rate limit
+	// is exceeded. This gives the user time to investigate the suspicious activity.
+	// Default: 5 minutes. Set to 0 to use default.
+	CooldownDuration time.Duration
 }
 
 // Prompter handles user approval dialogs.
 //
 // The prompter is designed to be called from the proxy's main loop
 // when a tool call has action="ask" in its policy rule.
+//
+// Rate Limiting:
+//
+//	To prevent approval fatigue attacks, the prompter tracks how many
+//	prompts have been shown recently. If too many prompts are requested
+//	in a short time, subsequent requests are auto-denied and a warning
+//	is logged. This protects users from being tricked into approving
+//	malicious requests after being overwhelmed with benign ones.
 type Prompter struct {
 	cfg PrompterConfig
+
+	// Rate limiting state
+	mu              sync.Mutex
+	promptTimes     []time.Time // Timestamps of recent prompts
+	cooldownUntil   time.Time   // If set, auto-deny until this time
+	rateLimitLogger func(format string, args ...any)
 }
 
 // NewPrompter creates a new Prompter with the given configuration.
@@ -60,9 +94,12 @@ type Prompter struct {
 func NewPrompter(cfg *PrompterConfig) *Prompter {
 	p := &Prompter{
 		cfg: PrompterConfig{
-			Timeout: DefaultTimeout,
-			Title:   "AIP Security Alert",
+			Timeout:             DefaultTimeout,
+			Title:               "AIP Security Alert",
+			MaxPromptsPerMinute: DefaultMaxPromptsPerMinute,
+			CooldownDuration:    DefaultCooldownDuration,
 		},
+		promptTimes: make([]time.Time, 0),
 	}
 	if cfg != nil {
 		if cfg.Timeout > 0 {
@@ -71,8 +108,32 @@ func NewPrompter(cfg *PrompterConfig) *Prompter {
 		if cfg.Title != "" {
 			p.cfg.Title = cfg.Title
 		}
+		if cfg.MaxPromptsPerMinute > 0 {
+			p.cfg.MaxPromptsPerMinute = cfg.MaxPromptsPerMinute
+		} else if cfg.MaxPromptsPerMinute < 0 {
+			// Negative value disables rate limiting
+			p.cfg.MaxPromptsPerMinute = 0
+		}
+		if cfg.CooldownDuration > 0 {
+			p.cfg.CooldownDuration = cfg.CooldownDuration
+		}
 	}
 	return p
+}
+
+// SetLogger sets a logger function for rate limit warnings.
+// The logger receives format strings compatible with log.Printf.
+func (p *Prompter) SetLogger(logger func(format string, args ...any)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rateLimitLogger = logger
+}
+
+// logRateLimit logs a rate limiting event if a logger is configured.
+func (p *Prompter) logRateLimit(format string, args ...any) {
+	if p.rateLimitLogger != nil {
+		p.rateLimitLogger(format, args...)
+	}
 }
 
 // AskUser displays a native OS dialog asking the user to approve a tool call.
@@ -99,7 +160,18 @@ func (p *Prompter) AskUser(tool string, args map[string]any) bool {
 
 // AskUserContext is like AskUser but accepts a context for cancellation.
 // The context timeout takes precedence over the configured timeout.
+//
+// Rate Limiting:
+//
+//	If too many prompts have been requested recently, this method returns
+//	false immediately without showing a dialog. This prevents approval
+//	fatigue attacks where an agent floods the user with prompts.
 func (p *Prompter) AskUserContext(ctx context.Context, tool string, args map[string]any) bool {
+	// Check rate limiting first
+	if !p.checkRateLimit(tool) {
+		return false // Auto-deny due to rate limit
+	}
+
 	// Build the message
 	message := p.buildMessage(tool, args)
 
@@ -138,6 +210,87 @@ func (p *Prompter) AskUserContext(ctx context.Context, tool string, args map[str
 		// Context cancelled - default to DENY
 		return false
 	}
+}
+
+// checkRateLimit verifies we haven't exceeded the prompt rate limit.
+// Returns true if the prompt is allowed, false if rate limited.
+//
+// This is the core defense against approval fatigue attacks.
+func (p *Prompter) checkRateLimit(tool string) bool {
+	// Rate limiting disabled?
+	if p.cfg.MaxPromptsPerMinute <= 0 {
+		return true
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := time.Now()
+
+	// Check if we're in cooldown period
+	if now.Before(p.cooldownUntil) {
+		remaining := p.cooldownUntil.Sub(now).Round(time.Second)
+		p.logRateLimit("RATE_LIMIT_COOLDOWN: Auto-denying %q (cooldown active, %v remaining)", tool, remaining)
+		return false
+	}
+
+	// Clean up old timestamps (older than 1 minute)
+	cutoff := now.Add(-time.Minute)
+	validTimes := make([]time.Time, 0, len(p.promptTimes))
+	for _, t := range p.promptTimes {
+		if t.After(cutoff) {
+			validTimes = append(validTimes, t)
+		}
+	}
+	p.promptTimes = validTimes
+
+	// Check if we've exceeded the rate limit
+	if len(p.promptTimes) >= p.cfg.MaxPromptsPerMinute {
+		// Enter cooldown mode
+		p.cooldownUntil = now.Add(p.cfg.CooldownDuration)
+		p.logRateLimit("RATE_LIMIT_EXCEEDED: %d prompts in last minute (max: %d). "+
+			"Auto-denying %q. Entering cooldown for %v. "+
+			"SECURITY: Possible approval fatigue attack detected!",
+			len(p.promptTimes), p.cfg.MaxPromptsPerMinute, tool, p.cfg.CooldownDuration)
+		return false
+	}
+
+	// Record this prompt
+	p.promptTimes = append(p.promptTimes, now)
+	return true
+}
+
+// GetRateLimitStatus returns the current rate limiting status.
+// Useful for diagnostics and testing.
+func (p *Prompter) GetRateLimitStatus() (promptsInLastMinute int, inCooldown bool, cooldownRemaining time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := time.Now()
+
+	// Count recent prompts
+	cutoff := now.Add(-time.Minute)
+	count := 0
+	for _, t := range p.promptTimes {
+		if t.After(cutoff) {
+			count++
+		}
+	}
+
+	inCooldown = now.Before(p.cooldownUntil)
+	if inCooldown {
+		cooldownRemaining = p.cooldownUntil.Sub(now)
+	}
+
+	return count, inCooldown, cooldownRemaining
+}
+
+// ResetRateLimit clears the rate limit state. Useful for testing.
+func (p *Prompter) ResetRateLimit() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.promptTimes = make([]time.Time, 0)
+	p.cooldownUntil = time.Time{}
 }
 
 // buildMessage constructs the dialog message content.
