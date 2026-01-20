@@ -1,130 +1,180 @@
-# Agent Identity Protocol (AIP)
+<p align="center">
+  <h1 align="center">Agent Identity Protocol (AIP)</h1>
+  <p align="center"><em>The Zero-Trust Identity Layer for MCP & Autonomous Agents</em></p>
+</p>
 
-> **The open standard for AI agent authorization.** Defend against prompt injection attacks, data exfiltration, and privilege escalation in LLM tool-use scenarios.
-
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/codeql.yml/badge.svg)](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/codeql.yml)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/ArangoGutierrez/agent-identity-protocol/badge)](https://securityscorecards.dev/viewer/?uri=github.com/ArangoGutierrez/agent-identity-protocol)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ArangoGutierrez/agent-identity-protocol)](https://goreportcard.com/report/github.com/ArangoGutierrez/agent-identity-protocol)
-
----
-
-## What is AIP?
-
-AIP is a **protocol specification** for policy-based authorization of AI agent tool calls. It defines how to declare what an agent can do, enforce those policies at runtime, and audit every decision.
-
-AIP works with the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) to add a security layer between AI agents and the tools they use.
+<p align="center">
+  <a href="https://goreportcard.com/report/github.com/ArangoGutierrez/agent-identity-protocol"><img src="https://goreportcard.com/badge/github.com/ArangoGutierrez/agent-identity-protocol" alt="Go Report Card"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ArangoGutierrez/agent-identity-protocol/ci.yml?label=Build" alt="Build Status"></a>
+  <a href="https://securityscorecards.dev/viewer/?uri=github.com/ArangoGutierrez/agent-identity-protocol"><img src="https://img.shields.io/badge/Security-Hardened-green" alt="Security"></a>
+  <a href="https://twitter.com/ArangoGutworker"><img src="https://img.shields.io/twitter/follow/ArangoGutworker?style=social" alt="Twitter Follow"></a>
+</p>
 
 ---
 
-## Quick Navigation
+## The God Mode Problem
 
-<table>
-<tr>
-<td width="50%" valign="top">
+Today's AI agents operate with **unrestricted access** to your infrastructure. When you connect Claude, Cursor, or any MCP-compatible agent to your systems, it receives *god mode*—full access to every tool the server exposes.
 
-### I want to implement AIP in my product
+Model safety isn't enough. **Indirect Prompt Injection** attacks—like [GeminiJack](https://embrace-the-red.com/blog/gemini-jack/)—have proven that adversarial instructions embedded in documents, emails, or data can hijack agent behavior. The model *believes* it's following your intent while executing the attacker's commands.
 
-You're building an MCP client (like Cursor, Claude Desktop, or a custom agent runtime) and want to add native AIP support.
+Your agent is one poisoned PDF away from `rm -rf /`.
 
-**Start here:** [spec/](spec/)
+> ***"Authentication is for Users. AIP is for Agents."***
 
-- [AIP Specification v1alpha1](spec/aip-v1alpha1.md) — The protocol definition
-- [JSON Schema](spec/schema/agent-policy.schema.json) — For policy validation
-- [Conformance Tests](spec/conformance/) — Verify your implementation
-
-</td>
-<td width="50%" valign="top">
-
-### I want to use AIP today
-
-You want to protect your MCP servers with policy enforcement right now, using the reference implementation.
-
-**Start here:** [implementations/go-proxy/](implementations/go-proxy/)
-
-- [Go Proxy README](implementations/go-proxy/README.md) — Installation & usage
-- [Quickstart](implementations/go-proxy/docs/quickstart.md) — 5-minute tutorial
-- [Integration Guide](implementations/go-proxy/docs/integration-guide.md) — Cursor, Claude Desktop
-
-</td>
-</tr>
-</table>
+AIP introduces **policy-based authorization** at the tool-call layer—the missing security primitive between your agents and your infrastructure.
 
 ---
 
-## The Problem
+## Architecture
 
-AI agents have **unrestricted access** to powerful tools. When you connect an LLM to your GitHub, database, or cloud infrastructure, there's no policy layer controlling what it can do.
+### High-Level Flow
 
-| Threat | What Happens |
-|--------|--------------|
-| **Prompt Injection** | Malicious instructions in data hijack the agent |
-| **Privilege Escalation** | Agent chains accumulate permissions |
-| **Data Exfiltration** | Sensitive data leaves through tool calls |
-| **Shadow AI** | Agents operate outside security boundaries |
+AIP operates as a transparent proxy between the AI client (Cursor, Claude, VS Code) and the MCP tool server. Every tool call passes through the policy engine before reaching the real tool.
 
-**[Read more →](docs/why-aip.md)**
-
----
-
-## How AIP Works
-
-```
-┌──────────┐     ┌─────────────────┐     ┌──────────────┐
-│  Agent   │────▶│   AIP Policy    │────▶│  MCP Server  │
-│  (LLM)   │◀────│     Engine      │◀────│   (Tools)    │
-└──────────┘     └─────────────────┘     └──────────────┘
-                        │
-                        ▼
-                 ┌─────────────┐
-                 │ Audit Log   │
-                 └─────────────┘
+```mermaid
+graph LR
+    subgraph Client
+        A[🤖 Cursor / Claude]
+    end
+    
+    subgraph AIP["🛡️ AIP Proxy"]
+        B[Policy Engine]
+        C[DLP Scanner]
+        D[Audit Log]
+    end
+    
+    subgraph Server
+        E[🔧 Docker / Postgres / GitHub]
+    end
+    
+    A -->|tools/call| B
+    B -->|ALLOW| E
+    B -->|DENY| A
+    B --> C
+    C --> D
+    E -->|response| C
+    C -->|filtered| A
+    
+    style B fill:#22c55e,stroke:#16a34a,stroke-width:2px,color:#fff
+    style AIP fill:#f0fdf4,stroke:#16a34a,stroke-width:3px
 ```
 
-1. **Declare** what the agent can do in a YAML policy
-2. **Enforce** policies on every `tools/call` request  
-3. **Audit** all decisions in an immutable log
+### Defense-in-Depth: Attack Blocked
+
+When an injected prompt attempts to execute a dangerous operation, AIP intercepts and blocks it before the tool ever receives the request.
+
+```mermaid
+sequenceDiagram
+    participant Agent as 🤖 Agent (Hijacked)
+    participant AIP as 🛡️ AIP Proxy
+    participant Policy as 📋 agent.yaml
+    participant Tool as 🔧 Real Tool
+
+    Agent->>AIP: tools/call "delete_database"
+    AIP->>Policy: Check allowed_tools
+    Policy-->>AIP: ❌ Not in allowlist
+    AIP->>AIP: Decision: BLOCK
+    AIP-->>Agent: Error: -32001 Forbidden
+    Note over Tool: Never receives request
+    Note over AIP: Logged to audit trail
+```
 
 ---
 
-## Core Concepts
+## Why AIP?
 
-### Policy File (`agent.yaml`)
+| Feature | Standard MCP | AIP-Enabled MCP |
+|---------|--------------|-----------------|
+| **Prompt Injection** | ⚠️ Vulnerable — Executes any command | ✅ Protected — Blocks unauthorized intent |
+| **Data Exfiltration** | ⚠️ Unrestricted internet access | ✅ Egress filtering + DLP redaction |
+| **Consent Fatigue** | ⚠️ Click "Allow" 50 times per session | ✅ Policy-based autonomy |
+| **Audit Trail** | ⚠️ None / stdio logs | ✅ Immutable JSONL structured logs |
+| **Privilege Model** | ⚠️ All-or-nothing API keys | ✅ Per-tool, per-argument validation |
+| **Human-in-the-Loop** | ⚠️ Not supported | ✅ Native OS approval dialogs |
+
+---
+
+## Quick Start
+
+Secure any MCP tool server in one command:
+
+```bash
+# Wrap your Docker MCP server with a read-only policy
+aip wrap docker --policy ./policies/read-only.yaml
+```
+
+Or protect your existing configuration:
+
+```bash
+# Start the AIP proxy with your policy
+aip --target "python mcp_server.py" --policy ./agent.yaml
+
+# Generate Cursor IDE configuration
+aip --generate-cursor-config --policy ./agent.yaml --target "npx @mcp/server"
+```
+
+### Example Policy
 
 ```yaml
 apiVersion: aip.io/v1alpha1
 kind: AgentPolicy
 metadata:
-  name: my-agent
+  name: secure-agent
 spec:
   mode: enforce
   allowed_tools:
     - read_file
     - list_directory
+    - git_status
   tool_rules:
     - tool: write_file
-      action: ask      # Human approval required
+      action: ask        # Human approval required
     - tool: exec_command
-      action: block    # Never allowed
+      action: block      # Never allowed
   dlp:
     patterns:
       - name: "AWS Key"
         regex: "AKIA[A-Z0-9]{16}"
 ```
 
-### Key Features
+---
 
-| Feature | Description |
-|---------|-------------|
-| **Tool Allowlist** | Explicit list of permitted tools |
-| **Argument Validation** | Regex patterns for tool parameters |
-| **Human-in-the-Loop** | Native OS dialogs for approval |
-| **DLP Scanning** | Redact secrets from responses |
-| **Audit Logging** | Immutable JSONL trail |
-| **Monitor Mode** | Test policies without enforcement |
+## Documentation
 
-**[Full Policy Reference →](docs/policy-reference.md)**
+| Resource | Description |
+|----------|-------------|
+| [AIP Specification](spec/aip-v1alpha1.md) | Formal protocol definition (v1alpha1) |
+| [Policy Reference](docs/policy-reference.md) | Complete YAML schema |
+| [Go Proxy README](implementations/go-proxy/README.md) | Reference implementation |
+| [Quickstart Guide](implementations/go-proxy/docs/quickstart.md) | 5-minute tutorial |
+| [Why AIP?](docs/why-aip.md) | Threat model and design rationale |
+| [FAQ](docs/faq.md) | Common questions |
+
+---
+
+## Roadmap
+
+We're building a **standard**, not just a tool.
+
+- [x] **v0.1: Localhost Proxy** — The *"Little Snitch"* for AI Agents
+  - Tool allowlist enforcement
+  - Argument validation with regex
+  - Human-in-the-Loop (macOS, Linux)
+  - DLP output scanning
+  - JSONL audit logging
+  - Monitor mode
+
+- [ ] **v0.2: Kubernetes Sidecar** — The *"Istio"* for AI Agents
+  - Helm chart
+  - NetworkPolicy integration
+  - Prometheus metrics
+
+- [ ] **v1.0: Federation** — Enterprise Identity
+  - OIDC / SPIFFE identity federation
+  - Centralized policy management
+  - Multi-tenant audit aggregation
 
 ---
 
@@ -139,54 +189,13 @@ agent-identity-protocol/
 ├── implementations/             # IMPLEMENTATIONS
 │   └── go-proxy/                # Reference implementation (Go)
 │       ├── cmd/aip-proxy/       # Main binary
-│       ├── pkg/                 # Libraries
-│       ├── examples/            # Example policies
-│       └── docs/                # Implementation docs
-├── docs/                        # GENERAL DOCS
-│   ├── why-aip.md               # Problem statement
-│   ├── policy-reference.md      # Policy YAML reference
-│   └── faq.md                   # Common questions
-└── .github/                     # CI/CD
+│       ├── pkg/                 # Libraries (policy, dlp, audit, ui)
+│       └── examples/            # Example policies
+└── docs/                        # DOCUMENTATION
+    ├── why-aip.md               # Problem statement
+    ├── policy-reference.md      # Policy YAML reference
+    └── faq.md                   # Common questions
 ```
-
----
-
-## Roadmap
-
-### Specification
-
-- [x] v1alpha1 — Core policy schema, evaluation semantics, error codes
-- [ ] v1beta1 — Network egress control, identity federation
-- [ ] v1 — Stable release
-
-### Reference Implementation (Go Proxy)
-
-- [x] Tool allowlist enforcement
-- [x] Argument validation with regex
-- [x] Human-in-the-Loop (macOS, Linux)
-- [x] DLP output scanning
-- [x] JSONL audit logging
-- [x] Monitor mode
-- [ ] Kubernetes sidecar
-- [ ] Helm chart
-
-### Ecosystem
-
-- [ ] Conformance test runner
-- [ ] Policy linter / validator CLI
-- [ ] VS Code extension
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Why AIP?](docs/why-aip.md) | The problem and threat model |
-| [Policy Reference](docs/policy-reference.md) | Complete YAML schema |
-| [FAQ](docs/faq.md) | Common questions |
-| [AIP Specification](spec/aip-v1alpha1.md) | Formal protocol definition |
-| [Go Proxy](implementations/go-proxy/README.md) | Reference implementation |
 
 ---
 
@@ -195,9 +204,9 @@ agent-identity-protocol/
 AIP is an open specification. We welcome:
 
 - **Protocol feedback** — Issues and PRs to the spec
-- **New implementations** — Build AIP in Rust, TypeScript, etc.
+- **New implementations** — Build AIP in Rust, TypeScript, Python
 - **Security research** — Threat modeling, attack surface analysis
-- **Documentation** — Tutorials, examples, translations
+- **Documentation** — Tutorials, examples, integrations
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -205,7 +214,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Apache 2.0 — See [LICENSE](LICENSE)
+**Apache 2.0** — See [LICENSE](LICENSE)
 
 Enterprise-friendly. Use it, fork it, build on it.
 
@@ -218,5 +227,5 @@ For vulnerability reports, see [SECURITY.md](SECURITY.md).
 ---
 
 <p align="center">
-  <em>"Trust, but verify — automatically, at every tool call."</em>
+  <strong>Stop trusting your agents. Start verifying them.</strong>
 </p>
