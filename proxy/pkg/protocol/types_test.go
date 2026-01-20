@@ -47,9 +47,9 @@ func TestIsToolCallCaseInsensitive(t *testing.T) {
 // TestGetToolName verifies tool name extraction from requests.
 func TestGetToolName(t *testing.T) {
 	testCases := []struct {
-		name   string
-		req    *Request
-		want   string
+		name string
+		req  *Request
+		want string
 	}{
 		{
 			name: "valid tools/call",
