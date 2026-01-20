@@ -96,3 +96,44 @@ spec:
 
     - tool: drop_table
       action: block
+
+  # DLP (Data Loss Prevention) - Output Redaction
+  #
+  # The DLP scanner inspects tool responses (downstream) for sensitive data
+  # and redacts matches before forwarding to the client. This prevents
+  # accidental exposure of PII, API keys, and secrets through tool outputs.
+  #
+  # When a pattern matches, the sensitive data is replaced with:
+  #   [REDACTED:<RuleName>]
+  #
+  # Each redaction is logged to the audit trail as a DLP_TRIGGERED event.
+  dlp:
+    # enabled: true  # Default is true when dlp block is present
+    patterns:
+      # Email addresses (PII)
+      - name: "Email"
+        regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+
+      # AWS Access Key IDs (starts with AKIA, ASIA, etc.)
+      - name: "AWS Key"
+        regex: "(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"
+
+      # Generic secret patterns (api_key, secret, password with values)
+      - name: "Generic Secret"
+        regex: "(?i)(api_key|secret|password)\\s*[:=]\\s*['\"]?([a-zA-Z0-9-_]+)['\"]?"
+
+      # Social Security Numbers (US)
+      - name: "SSN"
+        regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+
+      # Credit Card Numbers (basic pattern - 16 digits with optional separators)
+      - name: "Credit Card"
+        regex: "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"
+
+      # GitHub Personal Access Tokens
+      - name: "GitHub Token"
+        regex: "ghp_[a-zA-Z0-9]{36}"
+
+      # Private keys (PEM format headers)
+      - name: "Private Key"
+        regex: "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
