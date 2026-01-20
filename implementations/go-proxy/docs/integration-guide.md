@@ -212,7 +212,7 @@ cat aip-audit.jsonl | jq -r '.tool' | sort | uniq -c | sort -rn
 # Dockerfile
 FROM golang:1.23-alpine AS builder
 WORKDIR /app
-COPY proxy/ .
+COPY implementations/go-proxy/ .
 RUN go build -o /aip ./cmd/aip-proxy
 
 FROM alpine:latest

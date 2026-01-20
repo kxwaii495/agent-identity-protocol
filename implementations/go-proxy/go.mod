@@ -1,4 +1,4 @@
-module github.com/ArangoGutierrez/agent-identity-protocol/proxy
+module github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy
 
 go 1.25
 

@@ -51,21 +51,21 @@ The proxy is a **stdin/stdout passthrough** that:
 
 | Path | Purpose |
 |------|---------|
-| `proxy/cmd/aip-proxy/main.go` | Entry point, proxy logic |
-| `proxy/pkg/policy/engine.go` | Policy loading and evaluation |
-| `proxy/pkg/dlp/scanner.go` | DLP regex scanning |
-| `proxy/pkg/audit/logger.go` | JSONL audit logging |
-| `proxy/pkg/ui/prompt.go` | Native OS dialogs |
-| `proxy/pkg/protocol/types.go` | JSON-RPC types |
+| `implementations/go-proxy/cmd/aip-proxy/main.go` | Entry point, proxy logic |
+| `implementations/go-proxy/pkg/policy/engine.go` | Policy loading and evaluation |
+| `implementations/go-proxy/pkg/dlp/scanner.go` | DLP regex scanning |
+| `implementations/go-proxy/pkg/audit/logger.go` | JSONL audit logging |
+| `implementations/go-proxy/pkg/ui/prompt.go` | Native OS dialogs |
+| `implementations/go-proxy/pkg/protocol/types.go` | JSON-RPC types |
 
 ## Common Tasks
 
 ### Adding a New Policy Feature
 
-1. Update `proxy/pkg/policy/engine.go` with new evaluation logic
+1. Update `implementations/go-proxy/pkg/policy/engine.go` with new evaluation logic
 2. Update policy types in the same file
 3. Add tests in `engine_test.go`
-4. Update example policies in `proxy/examples/`
+4. Update example policies in `implementations/go-proxy/examples/`
 5. Document in README or docs/
 
 ### Adding a New CLI Flag
@@ -79,7 +79,7 @@ The proxy is a **stdin/stdout passthrough** that:
 
 1. Patterns are defined in policy YAML under `spec.dlp.patterns`
 2. Test regex in `dlp/scanner_test.go`
-3. Add example to `proxy/examples/agent.yaml`
+3. Add example to `implementations/go-proxy/examples/agent.yaml`
 
 ## Testing
 

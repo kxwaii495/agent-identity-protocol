@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/policy"
+	"github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy/pkg/policy"
 )
 
 func TestNewScanner(t *testing.T) {

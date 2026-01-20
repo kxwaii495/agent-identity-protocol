@@ -32,14 +32,14 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: proxy/go.sum
+          cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Build
         working-directory: proxy
         run: make build
 
       - name: Verify binary exists
-        run: test -f proxy/bin/aip
+        run: test -f implementations/go-proxy/bin/aip
 
   test:
     name: Test
@@ -52,7 +52,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: proxy/go.sum
+          cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run tests
         working-directory: proxy
@@ -61,7 +61,7 @@ jobs:
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:
-          files: proxy/coverage.out
+          files: implementations/go-proxy/coverage.out
           flags: unittests
           fail_ci_if_error: false
 
@@ -76,7 +76,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: proxy/go.sum
+          cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run go vet
         working-directory: proxy
@@ -109,7 +109,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: proxy/go.sum
+          cache-dependency-path: implementations/go-proxy/go.sum
 
       - name: Run govulncheck
         working-directory: proxy

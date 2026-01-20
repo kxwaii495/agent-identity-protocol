@@ -32,7 +32,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/policy"
+	"github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy/pkg/policy"
 )
 
 // RedactionEvent captures details of a single redaction for audit logging.

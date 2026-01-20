@@ -1,5 +1,7 @@
 # Policy Reference
 
+> **Note**: This is a user-friendly guide to writing AIP policies. For the formal specification, see [spec/aip-v1alpha1.md](../spec/aip-v1alpha1.md).
+
 Complete reference for AIP policy YAML files (`agent.yaml`).
 
 ## Table of Contents

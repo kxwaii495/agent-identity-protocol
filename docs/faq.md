@@ -1,0 +1,160 @@
+# Frequently Asked Questions
+
+## General
+
+### What is AIP?
+
+AIP (Agent Identity Protocol) is an open specification for policy-based authorization of AI agent tool calls. It defines how to declare, enforce, and audit what actions an AI agent can perform.
+
+### What's the difference between the AIP specification and the Go proxy?
+
+- **AIP Specification** (`spec/`): The protocol standard that anyone can implement
+- **Go Proxy** (`implementations/go-proxy/`): One reference implementation of that standard
+
+Think of it like HTTP (the spec) vs Apache/Nginx (implementations).
+
+### Can I use AIP without the Go proxy?
+
+Yes! AIP is a specification. You can:
+- Implement AIP natively in your MCP client (Cursor, Claude Desktop, etc.)
+- Build your own proxy in any language
+- Use the Go proxy as a reference
+
+### Does AIP require changes to my MCP server?
+
+No. AIP sits between the MCP client and server as a transparent proxy. Your MCP server doesn't need any modifications.
+
+```
+[Agent] → [AIP Proxy] → [MCP Server]
+```
+
+The proxy intercepts `tools/call` requests, applies policy, and forwards allowed requests unchanged.
+
+## Security
+
+### How is AIP different from OAuth?
+
+| Aspect | OAuth | AIP |
+|--------|-------|-----|
+| Granularity | Scope-level ("repo access") | Action-level ("repos.get with org:X") |
+| Timing | Grant-time | Runtime (every call) |
+| Audience | End users | Developers/Security teams |
+| Format | Token claims | YAML policy files |
+
+OAuth answers "who is this?" AIP answers "should this specific action be allowed?"
+
+### Can AIP prevent all prompt injection attacks?
+
+AIP significantly reduces the blast radius of prompt injection by:
+- Limiting which tools an agent can call
+- Validating arguments with regex patterns
+- Requiring human approval for sensitive operations
+- Logging all decisions for forensic analysis
+
+However, AIP cannot prevent prompt injection itself—it mitigates the *consequences*.
+
+### What about network egress? Can a malicious agent exfiltrate data?
+
+Network egress control is planned for AIP v1beta1 (see [spec Appendix D](../spec/aip-v1alpha1.md#appendix-d-future-extensions)). Currently, tool-level authorization is enforced but the MCP server subprocess can still make network calls.
+
+For maximum security today, run MCP servers in containers with `--network=none`.
+
+### Are audit logs tamper-proof?
+
+Audit logs are append-only from the agent's perspective (the agent doesn't have write access to the log file). For production use, forward logs to an external SIEM or use signed logging.
+
+## Policy
+
+### Where do I put my policy file?
+
+Anywhere you like. Common locations:
+- `~/.config/aip/policy.yaml` (user config)
+- `./agent.yaml` (project root)
+- `/etc/aip/policy.yaml` (system-wide)
+
+Pass the path with `--policy /path/to/policy.yaml`.
+
+### What happens if a tool isn't in `allowed_tools`?
+
+It's blocked with error code `-32001 Forbidden`. AIP is **default-deny**.
+
+### Can I test a policy without blocking anything?
+
+Yes! Use monitor mode:
+
+```yaml
+spec:
+  mode: monitor  # Log violations but don't block
+```
+
+Check the audit log to see what *would* have been blocked.
+
+### How do I allow a tool but require approval?
+
+Use `action: ask`:
+
+```yaml
+tool_rules:
+  - tool: deploy_production
+    action: ask  # Shows native OS dialog
+```
+
+### Can I validate tool arguments?
+
+Yes, with regex patterns:
+
+```yaml
+tool_rules:
+  - tool: postgres_query
+    allow_args:
+      query: "^SELECT\\s+.*"  # Only SELECT queries
+```
+
+## Implementation
+
+### What MCP clients work with AIP?
+
+Any MCP client that supports custom server commands:
+- **Cursor**: Add to `~/.cursor/mcp.json`
+- **Claude Desktop**: Add to `claude_desktop_config.json`
+- **Continue (VS Code)**: Add to Continue config
+- **Custom clients**: Use AIP as the server command
+
+### Does AIP work on Windows?
+
+The Go proxy builds for Windows. Human-in-the-loop (`action: ask`) uses native Windows dialogs via PowerShell.
+
+### How do I debug policy issues?
+
+1. Enable verbose mode: `--verbose`
+2. Check stderr for policy decisions
+3. Review the audit log: `cat aip-audit.jsonl | jq .`
+4. Use monitor mode to test without blocking
+
+### What's the performance overhead?
+
+Minimal. The proxy adds:
+- ~1-5ms per request for policy evaluation
+- Negligible memory overhead (policies are loaded once)
+
+JSON-RPC parsing and regex matching are fast operations.
+
+## Contributing
+
+### How do I report a security vulnerability?
+
+See [SECURITY.md](../SECURITY.md) for responsible disclosure instructions.
+
+### Can I contribute a new implementation?
+
+Yes! We welcome implementations in other languages. Requirements:
+- Pass the conformance test suite (`spec/conformance/`)
+- Document your implementation
+- Submit a PR to be listed in the registry
+
+### How do I propose changes to the specification?
+
+1. Open an issue describing the change
+2. Discuss with maintainers
+3. Submit a PR to `spec/aip-v1alpha1.md`
+4. Include conformance tests for new behavior

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/audit"
-	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/policy"
-	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/protocol"
+	"github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy/pkg/audit"
+	"github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy/pkg/policy"
+	"github.com/ArangoGutierrez/agent-identity-protocol/implementations/go-proxy/pkg/protocol"
 )
 
 // TestMonitorModeIntegration tests the full integration of monitor mode:

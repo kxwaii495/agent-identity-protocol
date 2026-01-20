@@ -127,7 +127,7 @@ We use CVSS v3.1 for severity scoring:
 
 ### In Scope
 
-- AIP proxy implementation (`proxy/`)
+- AIP proxy implementation (`implementations/go-proxy/`)
 - Client SDKs (`sdk/`)
 - Manifest parsing and validation
 - Identity token generation and validation

@@ -62,6 +62,26 @@ To propose changes to the specification:
 3. Include test vectors for new behavior
 4. Update the changelog in the spec document
 
+## Reference Implementation
+
+The Go proxy in [`implementations/go-proxy/`](../implementations/go-proxy/) is the reference implementation of this specification. It demonstrates:
+
+- Policy loading and evaluation
+- Unicode normalization (NFKC)
+- All error codes
+- DLP scanning
+- Audit logging
+
+Use it as a guide when building your own implementation.
+
+## Registered Implementations
+
+| Implementation | Language | Conformance | Maintainer |
+|----------------|----------|-------------|------------|
+| [go-proxy](../implementations/go-proxy/) | Go | Full + Extended | @ArangoGutierrez |
+
+*To register your implementation, submit a PR after passing the conformance suite.*
+
 ## License
 
 The specification is licensed under Apache 2.0, same as the reference implementation.
