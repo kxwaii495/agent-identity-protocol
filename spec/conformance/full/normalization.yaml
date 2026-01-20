@@ -1,0 +1,291 @@
+# AIP Conformance Tests: Name Normalization
+# Level: Full
+# Tests: Unicode NFKC normalization, case handling, bypass prevention
+
+name: "Name Normalization"
+description: "Tests for tool/method name normalization to prevent bypass attacks"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # Case Insensitivity
+  # ==========================================================================
+  
+  - id: "norm-001"
+    description: "Tool name should be case-insensitive"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+    input:
+      method: "tools/call"
+      tool: "READ_FILE"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "norm-002"
+    description: "Mixed case tool name should match"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - delete_file
+    input:
+      method: "tools/call"
+      tool: "Delete_File"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Fullwidth Characters (NFKC)
+  # ==========================================================================
+  
+  - id: "norm-010"
+    description: "Fullwidth letters should normalize to ASCII (ｄｅｌｅｔｅ → delete)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - delete_file
+    input:
+      method: "tools/call"
+      tool: "ｄｅｌｅｔｅ＿ｆｉｌｅ"  # Fullwidth characters
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "norm-011"
+    description: "Fullwidth blocked tool should still be blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: exec_command
+            action: block
+    input:
+      method: "tools/call"
+      tool: "ｅｘｅｃ＿ｃｏｍｍａｎｄ"  # Fullwidth
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Ligatures (NFKC)
+  # ==========================================================================
+  
+  - id: "norm-020"
+    description: "Ligature fi should normalize (ﬁle → file)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - file_read
+    input:
+      method: "tools/call"
+      tool: "ﬁle_read"  # fi ligature (U+FB01)
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "norm-021"
+    description: "Ligature fl should normalize (ﬂow → flow)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - flow_control
+    input:
+      method: "tools/call"
+      tool: "ﬂow_control"  # fl ligature (U+FB02)
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Zero-Width Characters
+  # ==========================================================================
+  
+  - id: "norm-030"
+    description: "Zero-width space should be removed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: delete_file
+            action: block
+    input:
+      method: "tools/call"
+      tool: "delete\u200Bfile"  # Zero-width space (U+200B)
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "norm-031"
+    description: "Zero-width non-joiner should be removed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: exec_command
+            action: block
+    input:
+      method: "tools/call"
+      tool: "exec\u200Ccommand"  # Zero-width non-joiner (U+200C)
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "norm-032"
+    description: "BOM should be removed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - safe_tool
+    input:
+      method: "tools/call"
+      tool: "\uFEFFsafe_tool"  # BOM (U+FEFF)
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Superscripts and Subscripts
+  # ==========================================================================
+  
+  - id: "norm-040"
+    description: "Superscript numbers should normalize (tool² → tool2)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - tool2
+    input:
+      method: "tools/call"
+      tool: "tool²"  # Superscript 2 (U+00B2)
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Whitespace
+  # ==========================================================================
+  
+  - id: "norm-050"
+    description: "Leading/trailing whitespace should be trimmed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+    input:
+      method: "tools/call"
+      tool: "  read_file  "
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "norm-051"
+    description: "Unicode whitespace should be trimmed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+    input:
+      method: "tools/call"
+      tool: "\u2003read_file\u2003"  # Em space (U+2003)
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Known Limitations (Cyrillic homoglyphs)
+  # ==========================================================================
+  
+  - id: "norm-060"
+    description: "KNOWN LIMITATION: Cyrillic 'а' is NOT normalized to Latin 'a'"
+    note: |
+      NFKC normalization does not convert Cyrillic characters to Latin.
+      This is a documented limitation. Implementations MAY add additional
+      homoglyph detection but it is not required for conformance.
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - delete_file   # Latin 'e'
+    input:
+      method: "tools/call"
+      tool: "dеlеtе_filе"  # Cyrillic 'е' (U+0435)
+      args: {}
+    expected:
+      # This WILL be blocked because Cyrillic doesn't match Latin
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true

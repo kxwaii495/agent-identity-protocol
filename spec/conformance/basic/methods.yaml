@@ -1,0 +1,222 @@
+# AIP Conformance Tests: Method Authorization
+# Level: Basic
+# Tests: JSON-RPC method allowlist/denylist
+
+name: "Method Authorization"
+description: "Tests for JSON-RPC method-level authorization"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # Default Methods
+  # ==========================================================================
+  
+  - id: "method-001"
+    description: "tools/call should be allowed by default"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+    input:
+      method: "tools/call"
+      tool: "any_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "method-002"
+    description: "tools/list should be allowed by default"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "tools/list"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "method-003"
+    description: "initialize should be allowed by default"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "initialize"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "method-004"
+    description: "resources/read should be BLOCKED by default (not in safe list)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "resources/read"
+    expected:
+      decision: "BLOCK"
+      error_code: -32006
+      violation: true
+
+  - id: "method-005"
+    description: "prompts/get should be BLOCKED by default"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "prompts/get"
+    expected:
+      decision: "BLOCK"
+      error_code: -32006
+      violation: true
+
+  # ==========================================================================
+  # Explicit Allowed Methods
+  # ==========================================================================
+  
+  - id: "method-010"
+    description: "Method in allowed_methods should be permitted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_methods:
+          - resources/read
+          - tools/call
+        allowed_tools: []
+    input:
+      method: "resources/read"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "method-011"
+    description: "Wildcard '*' in allowed_methods should allow all methods"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_methods:
+          - "*"
+        allowed_tools: []
+    input:
+      method: "any/method"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Denied Methods
+  # ==========================================================================
+  
+  - id: "method-020"
+    description: "Method in denied_methods should be blocked even if in allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_methods:
+          - "*"
+        denied_methods:
+          - dangerous/method
+        allowed_tools: []
+    input:
+      method: "dangerous/method"
+    expected:
+      decision: "BLOCK"
+      error_code: -32006
+      violation: true
+
+  - id: "method-021"
+    description: "Denied method takes precedence over wildcard allow"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_methods:
+          - "*"
+        denied_methods:
+          - logging/setLevel
+        allowed_tools: []
+    input:
+      method: "logging/setLevel"
+    expected:
+      decision: "BLOCK"
+      error_code: -32006
+      violation: true
+
+  # ==========================================================================
+  # Case Sensitivity
+  # ==========================================================================
+  
+  - id: "method-030"
+    description: "Method names should be case-insensitive (TOOLS/CALL = tools/call)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - test_tool
+    input:
+      method: "TOOLS/CALL"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "method-031"
+    description: "Mixed case method should work (Tools/Call)"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - test_tool
+    input:
+      method: "Tools/Call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false

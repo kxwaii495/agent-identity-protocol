@@ -1,0 +1,238 @@
+# AIP Conformance Tests: Data Loss Prevention
+# Level: Full
+# Tests: Pattern matching, redaction format, encoding detection
+
+name: "Data Loss Prevention"
+description: "Tests for DLP scanning and redaction of sensitive data"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # Basic Pattern Matching
+  # ==========================================================================
+  
+  - id: "dlp-001"
+    description: "AWS key should be redacted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "AWS Key"
+              regex: "(AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"
+    input:
+      type: "response"
+      content: "Your key is AKIAIOSFODNN7EXAMPLE"
+    expected:
+      redacted: true
+      output: "Your key is [REDACTED:AWS Key]"
+      dlp_events:
+        - rule: "AWS Key"
+          count: 1
+
+  - id: "dlp-002"
+    description: "Multiple matches should all be redacted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "Email"
+              regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+    input:
+      type: "response"
+      content: "Contact alice@example.com or bob@test.org for help"
+    expected:
+      redacted: true
+      output: "Contact [REDACTED:Email] or [REDACTED:Email] for help"
+      dlp_events:
+        - rule: "Email"
+          count: 2
+
+  # ==========================================================================
+  # Multiple Patterns
+  # ==========================================================================
+  
+  - id: "dlp-010"
+    description: "Multiple different patterns should be applied"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "Email"
+              regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+            - name: "SSN"
+              regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+    input:
+      type: "response"
+      content: "User: alice@test.com, SSN: 123-45-6789"
+    expected:
+      redacted: true
+      output: "User: [REDACTED:Email], SSN: [REDACTED:SSN]"
+      dlp_events:
+        - rule: "Email"
+          count: 1
+        - rule: "SSN"
+          count: 1
+
+  # ==========================================================================
+  # No Matches
+  # ==========================================================================
+  
+  - id: "dlp-020"
+    description: "Content without sensitive data should pass through unchanged"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "AWS Key"
+              regex: "(AKIA|AGPA)[A-Z0-9]{16}"
+    input:
+      type: "response"
+      content: "Hello, this is normal output with no secrets."
+    expected:
+      redacted: false
+      output: "Hello, this is normal output with no secrets."
+      dlp_events: []
+
+  # ==========================================================================
+  # DLP Disabled
+  # ==========================================================================
+  
+  - id: "dlp-030"
+    description: "DLP explicitly disabled should pass through"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          enabled: false
+          patterns:
+            - name: "Email"
+              regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+    input:
+      type: "response"
+      content: "Email: secret@test.com"
+    expected:
+      redacted: false
+      output: "Email: secret@test.com"
+      dlp_events: []
+
+  # ==========================================================================
+  # Common Sensitive Data Patterns
+  # ==========================================================================
+  
+  - id: "dlp-040"
+    description: "GitHub token should be redacted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "GitHub Token"
+              regex: "ghp_[a-zA-Z0-9]{36}"
+    input:
+      type: "response"
+      content: "Token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    expected:
+      redacted: true
+      output: "Token: [REDACTED:GitHub Token]"
+
+  - id: "dlp-041"
+    description: "Private key header should be redacted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "Private Key"
+              regex: "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    input:
+      type: "response"
+      content: "Key: -----BEGIN RSA PRIVATE KEY-----\nMIIE..."
+    expected:
+      redacted: true
+      output: "Key: [REDACTED:Private Key]\nMIIE..."
+
+  - id: "dlp-042"
+    description: "Credit card number should be redacted"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "Credit Card"
+              regex: "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b"
+    input:
+      type: "response"
+      content: "Card: 4111-1111-1111-1111"
+    expected:
+      redacted: true
+      output: "Card: [REDACTED:Credit Card]"
+
+  # ==========================================================================
+  # Redaction Format
+  # ==========================================================================
+  
+  - id: "dlp-050"
+    description: "Redaction format must be [REDACTED:<name>]"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - any_tool
+        dlp:
+          patterns:
+            - name: "Secret Pattern"
+              regex: "SECRET_[A-Z]+"
+    input:
+      type: "response"
+      content: "Value: SECRET_ABC"
+    expected:
+      redacted: true
+      output: "Value: [REDACTED:Secret Pattern]"
+      # The redaction marker MUST include the pattern name

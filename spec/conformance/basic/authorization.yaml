@@ -1,0 +1,229 @@
+# AIP Conformance Tests: Basic Authorization
+# Level: Basic
+# Tests: Tool allowlist enforcement, blocking, default deny
+
+name: "Basic Authorization"
+description: "Tests for tool-level authorization decisions"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # Allowlist Tests
+  # ==========================================================================
+  
+  - id: "auth-001"
+    description: "Tool in allowed_tools list should be allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+          - list_directory
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "auth-002"
+    description: "Tool NOT in allowed_tools list should be blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+    input:
+      method: "tools/call"
+      tool: "delete_file"
+      args:
+        path: "/tmp/test.txt"
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "auth-003"
+    description: "Empty allowed_tools with no tool_rules should block all tools"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "tools/call"
+      tool: "any_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Tool Rules: Block Action
+  # ==========================================================================
+  
+  - id: "auth-010"
+    description: "Tool with action=block should be denied unconditionally"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - safe_tool
+        tool_rules:
+          - tool: dangerous_tool
+            action: block
+    input:
+      method: "tools/call"
+      tool: "dangerous_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "auth-011"
+    description: "Blocked tool should remain blocked even if in allowed_tools"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - dangerous_tool
+        tool_rules:
+          - tool: dangerous_tool
+            action: block
+    input:
+      method: "tools/call"
+      tool: "dangerous_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Tool Rules: Allow Action
+  # ==========================================================================
+  
+  - id: "auth-020"
+    description: "Tool with action=allow in tool_rules should be allowed even if not in allowed_tools"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+        tool_rules:
+          - tool: special_tool
+            action: allow
+    input:
+      method: "tools/call"
+      tool: "special_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Tool Rules: Ask Action
+  # ==========================================================================
+  
+  - id: "auth-030"
+    description: "Tool with action=ask should return ASK decision"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: sensitive_tool
+            action: ask
+    input:
+      method: "tools/call"
+      tool: "sensitive_tool"
+      args: {}
+    expected:
+      decision: "ASK"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # Monitor Mode
+  # ==========================================================================
+  
+  - id: "auth-040"
+    description: "In monitor mode, violations should be logged but allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        mode: monitor
+        allowed_tools:
+          - safe_tool
+    input:
+      method: "tools/call"
+      tool: "blocked_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: true
+      # Note: violation=true but decision=ALLOW indicates monitor mode
+
+  - id: "auth-041"
+    description: "In enforce mode (default), violations should be blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        mode: enforce
+        allowed_tools:
+          - safe_tool
+    input:
+      method: "tools/call"
+      tool: "blocked_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # No Policy Loaded
+  # ==========================================================================
+  
+  - id: "auth-050"
+    description: "With no policy loaded, all tools should be blocked (fail-closed)"
+    policy: null  # No policy
+    input:
+      method: "tools/call"
+      tool: "any_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true

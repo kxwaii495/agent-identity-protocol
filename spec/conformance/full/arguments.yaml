@@ -1,0 +1,368 @@
+# AIP Conformance Tests: Argument Validation
+# Level: Full
+# Tests: Regex validation, strict args mode, type coercion
+
+name: "Argument Validation"
+description: "Tests for tool argument validation with regex patterns"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # Basic Regex Matching
+  # ==========================================================================
+  
+  - id: "args-001"
+    description: "Argument matching regex should be allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: fetch_url
+            action: allow
+            allow_args:
+              url: "^https://github\\.com/.*"
+    input:
+      method: "tools/call"
+      tool: "fetch_url"
+      args:
+        url: "https://github.com/user/repo"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-002"
+    description: "Argument NOT matching regex should be blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: fetch_url
+            action: allow
+            allow_args:
+              url: "^https://github\\.com/.*"
+    input:
+      method: "tools/call"
+      tool: "fetch_url"
+      args:
+        url: "https://evil.com/steal"
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Missing Required Arguments
+  # ==========================================================================
+  
+  - id: "args-010"
+    description: "Missing constrained argument should be blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: exec_command
+            action: allow
+            allow_args:
+              command: "^echo\\s.*"
+    input:
+      method: "tools/call"
+      tool: "exec_command"
+      args: {}  # Missing 'command' argument
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Multiple Arguments
+  # ==========================================================================
+  
+  - id: "args-020"
+    description: "All constrained arguments must match"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: http_request
+            action: allow
+            allow_args:
+              url: "^https://api\\.github\\.com/.*"
+              method: "^(GET|POST)$"
+    input:
+      method: "tools/call"
+      tool: "http_request"
+      args:
+        url: "https://api.github.com/repos"
+        method: "GET"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-021"
+    description: "If any constrained argument fails, request is blocked"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: http_request
+            action: allow
+            allow_args:
+              url: "^https://api\\.github\\.com/.*"
+              method: "^(GET|POST)$"
+    input:
+      method: "tools/call"
+      tool: "http_request"
+      args:
+        url: "https://api.github.com/repos"
+        method: "DELETE"  # Not allowed
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Strict Args Mode
+  # ==========================================================================
+  
+  - id: "args-030"
+    description: "With strict_args, undeclared arguments should be rejected"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: http_request
+            action: allow
+            strict_args: true
+            allow_args:
+              url: "^https://.*"
+    input:
+      method: "tools/call"
+      tool: "http_request"
+      args:
+        url: "https://example.com"
+        headers:  # Not declared in allow_args
+          Authorization: "Bearer secret"
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "args-031"
+    description: "Without strict_args, undeclared arguments are allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: http_request
+            action: allow
+            strict_args: false
+            allow_args:
+              url: "^https://.*"
+    input:
+      method: "tools/call"
+      tool: "http_request"
+      args:
+        url: "https://example.com"
+        headers:  # Not declared, but allowed without strict_args
+          Authorization: "Bearer secret"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-032"
+    description: "strict_args_default applies to all tools without explicit setting"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        strict_args_default: true
+        tool_rules:
+          - tool: api_call
+            action: allow
+            allow_args:
+              endpoint: "^/api/.*"
+    input:
+      method: "tools/call"
+      tool: "api_call"
+      args:
+        endpoint: "/api/users"
+        extra_param: "malicious"  # Undeclared
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  # ==========================================================================
+  # Type Coercion
+  # ==========================================================================
+  
+  - id: "args-040"
+    description: "Number arguments should be converted to string for regex"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: set_port
+            action: allow
+            allow_args:
+              port: "^[0-9]+$"
+    input:
+      method: "tools/call"
+      tool: "set_port"
+      args:
+        port: 8080  # Number, not string
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-041"
+    description: "Boolean arguments should be converted to string"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: set_flag
+            action: allow
+            allow_args:
+              enabled: "^(true|false)$"
+    input:
+      method: "tools/call"
+      tool: "set_flag"
+      args:
+        enabled: true  # Boolean, not string
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-042"
+    description: "Array arguments should be JSON-serialized for regex"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: set_tags
+            action: allow
+            allow_args:
+              tags: "^\\[.*\\]$"  # JSON array format
+    input:
+      method: "tools/call"
+      tool: "set_tags"
+      args:
+        tags: ["tag1", "tag2"]
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  # ==========================================================================
+  # SQL Injection Prevention Examples
+  # ==========================================================================
+  
+  - id: "args-050"
+    description: "SELECT-only query should be allowed"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: postgres_query
+            action: allow
+            allow_args:
+              query: "^SELECT\\s+.*"
+    input:
+      method: "tools/call"
+      tool: "postgres_query"
+      args:
+        query: "SELECT * FROM users WHERE id = 1"
+    expected:
+      decision: "ALLOW"
+      error_code: null
+      violation: false
+
+  - id: "args-051"
+    description: "DELETE query should be blocked by SELECT-only pattern"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: postgres_query
+            action: allow
+            allow_args:
+              query: "^SELECT\\s+.*"
+    input:
+      method: "tools/call"
+      tool: "postgres_query"
+      args:
+        query: "DELETE FROM users WHERE 1=1"
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      violation: true
+
+  - id: "args-052"
+    description: "SQL injection attempt should be blocked"
+    note: "Pattern without $ anchor allows injection after SELECT"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: postgres_query
+            action: allow
+            allow_args:
+              # This pattern is INSECURE - missing anchor
+              query: "^SELECT\\s+.*"
+    input:
+      method: "tools/call"
+      tool: "postgres_query"
+      args:
+        # This WILL be allowed due to missing $ anchor - test documents the risk
+        query: "SELECT 1; DROP TABLE users; --"
+    expected:
+      decision: "ALLOW"  # Unfortunately allowed due to weak regex
+      error_code: null
+      violation: false

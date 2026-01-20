@@ -1,0 +1,213 @@
+# AIP Conformance Tests: Error Codes
+# Level: Basic
+# Tests: JSON-RPC error code correctness
+
+name: "Error Codes"
+description: "Tests for correct JSON-RPC error codes and messages"
+spec_version: "aip.io/v1alpha1"
+
+tests:
+  # ==========================================================================
+  # -32001 Forbidden
+  # ==========================================================================
+  
+  - id: "err-001"
+    description: "Blocked tool should return -32001 Forbidden"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - safe_tool
+    input:
+      method: "tools/call"
+      tool: "blocked_tool"
+      args: {}
+    expected:
+      decision: "BLOCK"
+      error_code: -32001
+      error_message: "Forbidden"
+      error_data:
+        tool: "blocked_tool"
+
+  # ==========================================================================
+  # -32002 Rate Limited
+  # ==========================================================================
+  
+  - id: "err-010"
+    description: "Rate limited tool should return -32002"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: limited_tool
+            action: allow
+            rate_limit: "1/minute"
+    input:
+      # Simulate second request within rate limit window
+      method: "tools/call"
+      tool: "limited_tool"
+      args: {}
+      context:
+        previous_calls: 1
+        window: "1m"
+    expected:
+      decision: "RATE_LIMITED"
+      error_code: -32002
+      error_message: "Rate limit exceeded"
+
+  # ==========================================================================
+  # -32004 User Denied
+  # ==========================================================================
+  
+  - id: "err-020"
+    description: "User-denied approval should return -32004"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: sensitive_tool
+            action: ask
+    input:
+      method: "tools/call"
+      tool: "sensitive_tool"
+      args: {}
+      context:
+        user_response: "deny"
+    expected:
+      decision: "BLOCK"
+      error_code: -32004
+      error_message: "User denied"
+
+  # ==========================================================================
+  # -32005 User Timeout
+  # ==========================================================================
+  
+  - id: "err-021"
+    description: "Approval timeout should return -32005"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        tool_rules:
+          - tool: sensitive_tool
+            action: ask
+    input:
+      method: "tools/call"
+      tool: "sensitive_tool"
+      args: {}
+      context:
+        user_response: "timeout"
+    expected:
+      decision: "BLOCK"
+      error_code: -32005
+      error_message: "User approval timeout"
+
+  # ==========================================================================
+  # -32006 Method Not Allowed
+  # ==========================================================================
+  
+  - id: "err-030"
+    description: "Blocked method should return -32006"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        denied_methods:
+          - dangerous/method
+        allowed_tools: []
+    input:
+      method: "dangerous/method"
+    expected:
+      decision: "BLOCK"
+      error_code: -32006
+      error_message: "Method not allowed"
+      error_data:
+        method: "dangerous/method"
+
+  # ==========================================================================
+  # -32007 Protected Path
+  # ==========================================================================
+  
+  - id: "err-040"
+    description: "Access to protected path should return -32007"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools:
+          - read_file
+        protected_paths:
+          - ~/.ssh
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "~/.ssh/id_rsa"
+    expected:
+      decision: "BLOCK"
+      error_code: -32007
+      error_message: "Access denied: protected path"
+
+  # ==========================================================================
+  # Error Response Format
+  # ==========================================================================
+  
+  - id: "err-050"
+    description: "Error response must be valid JSON-RPC 2.0"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "tools/call"
+      tool: "any_tool"
+      args: {}
+      request_id: 123
+    expected:
+      decision: "BLOCK"
+      response_format:
+        jsonrpc: "2.0"
+        id: 123
+        error:
+          code: -32001
+          message: "Forbidden"
+          data:
+            tool: "any_tool"
+            reason: "Tool not in allowed_tools list"
+
+  - id: "err-051"
+    description: "Error response ID must match request ID"
+    policy: |
+      apiVersion: aip.io/v1alpha1
+      kind: AgentPolicy
+      metadata:
+        name: test-policy
+      spec:
+        allowed_tools: []
+    input:
+      method: "tools/call"
+      tool: "blocked"
+      args: {}
+      request_id: "abc-123"  # String ID
+    expected:
+      decision: "BLOCK"
+      response_format:
+        id: "abc-123"  # Must match

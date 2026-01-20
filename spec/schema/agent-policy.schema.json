@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aip.io/schema/v1alpha1/agent-policy.schema.json",
+  "title": "AIP AgentPolicy",
+  "description": "Agent Identity Protocol policy document schema (v1alpha1)",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "aip.io/v1alpha1",
+      "description": "API version - must be 'aip.io/v1alpha1'"
+    },
+    "kind": {
+      "type": "string",
+      "const": "AgentPolicy",
+      "description": "Resource kind - must be 'AgentPolicy'"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/PolicySpec"
+    }
+  },
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "description": "Policy metadata",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Unique identifier for this policy (DNS-1123 subdomain)"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9]+)?$",
+          "description": "Semantic version (e.g., '1.0.0', '2.1.0-beta')"
+        },
+        "owner": {
+          "type": "string",
+          "format": "email",
+          "description": "Contact email for policy questions"
+        }
+      }
+    },
+    "PolicySpec": {
+      "type": "object",
+      "description": "Policy specification",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["enforce", "monitor"],
+          "default": "enforce",
+          "description": "Enforcement mode: 'enforce' blocks violations, 'monitor' logs only"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of tool names the agent may invoke"
+        },
+        "allowed_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of JSON-RPC methods that are permitted"
+        },
+        "denied_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of JSON-RPC methods that are explicitly denied"
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "File paths that tools may not access"
+        },
+        "strict_args_default": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, reject undeclared arguments by default"
+        },
+        "tool_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolRule"
+          },
+          "description": "Fine-grained rules for specific tools"
+        },
+        "dlp": {
+          "$ref": "#/$defs/DLPConfig"
+        }
+      }
+    },
+    "ToolRule": {
+      "type": "object",
+      "description": "Rule for a specific tool",
+      "required": ["tool"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool name this rule applies to"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["allow", "block", "ask"],
+          "default": "allow",
+          "description": "Action to take: 'allow', 'block', or 'ask' (human approval)"
+        },
+        "rate_limit": {
+          "type": "string",
+          "pattern": "^[0-9]+/(second|sec|s|minute|min|m|hour|hr|h)$",
+          "description": "Rate limit in format 'N/period' (e.g., '10/minute')"
+        },
+        "strict_args": {
+          "type": "boolean",
+          "description": "Override strict_args_default for this tool"
+        },
+        "allow_args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "description": "Regex pattern the argument value must match"
+          },
+          "description": "Map of argument names to regex validation patterns"
+        }
+      }
+    },
+    "DLPConfig": {
+      "type": "object",
+      "description": "Data Loss Prevention configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether DLP scanning is active"
+        },
+        "detect_encoding": {
+          "type": "boolean",
+          "default": false,
+          "description": "Decode base64/hex before scanning"
+        },
+        "filter_stderr": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply DLP to subprocess stderr"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DLPPattern"
+          },
+          "minItems": 1,
+          "description": "List of sensitive data patterns to detect"
+        }
+      },
+      "required": ["patterns"]
+    },
+    "DLPPattern": {
+      "type": "object",
+      "description": "A single DLP detection pattern",
+      "required": ["name", "regex"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Human-readable name for this pattern (used in redaction)"
+        },
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regular expression to match sensitive data"
+        }
+      }
+    }
+  }
+}
