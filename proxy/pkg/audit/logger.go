@@ -258,6 +258,60 @@ func (l *Logger) LogToolCall(tool string, args map[string]any, decision Decision
 	})
 }
 
+// LogMethodBlock logs when a JSON-RPC method is blocked by policy.
+// This is for method-level blocking (e.g., resources/read) which happens
+// BEFORE tool-level policy checks.
+func (l *Logger) LogMethodBlock(method string, reason string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	attrs := []slog.Attr{
+		slog.Time("timestamp", time.Now().UTC()),
+		slog.String("direction", string(DirectionUpstream)),
+		slog.String("event", "METHOD_BLOCKED"),
+		slog.String("method", method),
+		slog.String("reason", reason),
+		slog.String("policy_mode", string(l.mode)),
+	}
+
+	l.slogger.LogAttrs(context.Background(), slog.LevelWarn, "method_block", attrs...)
+}
+
+// LogProtectedPathBlock logs when a tool call is blocked due to accessing a protected path.
+// This is a critical security event - it may indicate an agent attempting policy
+// self-modification or accessing sensitive credentials.
+//
+// Example JSON output:
+//
+//	{
+//	  "timestamp": "2025-01-20T10:30:45.123Z",
+//	  "direction": "upstream",
+//	  "event": "PROTECTED_PATH_BLOCKED",
+//	  "tool": "write_file",
+//	  "protected_path": "/home/user/.ssh/id_rsa",
+//	  "policy_mode": "enforce"
+//	}
+func (l *Logger) LogProtectedPathBlock(tool string, protectedPath string, args map[string]any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	attrs := []slog.Attr{
+		slog.Time("timestamp", time.Now().UTC()),
+		slog.String("direction", string(DirectionUpstream)),
+		slog.String("event", "PROTECTED_PATH_BLOCKED"),
+		slog.String("tool", tool),
+		slog.String("protected_path", protectedPath),
+		slog.String("policy_mode", string(l.mode)),
+	}
+
+	// Include sanitized args for forensic analysis
+	if args != nil {
+		attrs = append(attrs, slog.Any("args", args))
+	}
+
+	l.slogger.LogAttrs(context.Background(), slog.LevelWarn, "protected_path_block", attrs...)
+}
+
 // LogDLPEvent logs a DLP redaction event.
 //
 // Called when the downstream response contains sensitive data that was redacted.

@@ -140,6 +140,16 @@ const (
 	// ErrCodeUserTimeout indicates the user did not respond in time.
 	// Returned when a tool call with action="ask" timed out waiting for user input.
 	ErrCodeUserTimeout = -32005
+
+	// ErrCodeMethodNotAllowed indicates the JSON-RPC method is not permitted.
+	// Returned when a method is blocked by the allowed_methods/denied_methods policy.
+	// This is the first line of defense against MCP method bypass attacks.
+	ErrCodeMethodNotAllowed = -32006
+
+	// ErrCodeProtectedPath indicates a tool attempted to access a protected path.
+	// This is a security-critical error indicating potential policy tampering
+	// or credential theft attempt.
+	ErrCodeProtectedPath = -32007
 )
 
 // -----------------------------------------------------------------------------
@@ -251,6 +261,51 @@ func NewRateLimitedError(requestID json.RawMessage, toolName string) *Response {
 			Data: map[string]string{
 				"tool":   toolName,
 				"reason": "Rate limit exceeded for " + toolName + ". Try again later.",
+			},
+		},
+	}
+}
+
+// NewMethodNotAllowedError creates a JSON-RPC error response for blocked methods.
+//
+// This is used when a JSON-RPC method (not tool) is blocked by policy.
+// Examples: resources/read, prompts/get when not explicitly allowed.
+//
+// This is the first line of defense against MCP method bypass attacks where
+// an attacker might try to use methods that aren't subject to tool-level checks.
+func NewMethodNotAllowedError(requestID json.RawMessage, method string) *Response {
+	return &Response{
+		JSONRPC: "2.0",
+		ID:      requestID,
+		Error: &Error{
+			Code:    ErrCodeMethodNotAllowed,
+			Message: "Method not allowed",
+			Data: map[string]string{
+				"method": method,
+				"reason": "Method '" + method + "' is not in allowed_methods. Add it to your policy to permit this method.",
+			},
+		},
+	}
+}
+
+// NewProtectedPathError creates a JSON-RPC error response for protected path access.
+//
+// This is a SECURITY-CRITICAL error indicating the agent attempted to access
+// a protected file path (e.g., ~/.ssh, policy file, credentials). This may
+// indicate a prompt injection attack or policy tampering attempt.
+//
+// The error intentionally does NOT reveal which paths are protected to avoid
+// leaking security configuration to potential attackers.
+func NewProtectedPathError(requestID json.RawMessage, toolName, protectedPath string) *Response {
+	return &Response{
+		JSONRPC: "2.0",
+		ID:      requestID,
+		Error: &Error{
+			Code:    ErrCodeProtectedPath,
+			Message: "Access denied: protected path",
+			Data: map[string]string{
+				"tool":   toolName,
+				"reason": "The requested operation would access a protected path. This action has been blocked and logged for security review.",
 			},
 		},
 	}
