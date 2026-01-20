@@ -112,6 +112,28 @@ tool_rules:
 
 ## Implementation
 
+### My Docker container doesn't stop when I kill the proxy!
+
+When wrapping a Docker container with AIP, signals (SIGTERM/SIGINT) are sent to the `docker` CLI process, not the container itself. This can leave zombie containers running.
+
+**Solution:** Always use `--rm` and `--init` flags:
+
+```bash
+# Bad - container may not receive signals
+aip --policy policy.yaml --target "docker run myimage"
+
+# Good - proper signal handling and cleanup
+aip --policy policy.yaml --target "docker run --rm --init -i myimage"
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--rm` | Automatically remove container when it exits |
+| `--init` | Run init process (tini) that forwards signals properly |
+| `-i` | Keep stdin open for JSON-RPC communication |
+
+For production deployments, consider running the AIP proxy *inside* the container or using a container orchestrator with proper lifecycle management.
+
 ### What MCP clients work with AIP?
 
 Any MCP client that supports custom server commands:

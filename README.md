@@ -1,9 +1,11 @@
 # Agent Identity Protocol (AIP)
 
-> **The open standard for AI agent authorization.**
+> **The open standard for AI agent authorization.** Defend against prompt injection attacks, data exfiltration, and privilege escalation in LLM tool-use scenarios.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/codeql.yml/badge.svg)](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/ArangoGutierrez/agent-identity-protocol/badge)](https://securityscorecards.dev/viewer/?uri=github.com/ArangoGutierrez/agent-identity-protocol)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ArangoGutierrez/agent-identity-protocol)](https://goreportcard.com/report/github.com/ArangoGutierrez/agent-identity-protocol)
 
 ---
