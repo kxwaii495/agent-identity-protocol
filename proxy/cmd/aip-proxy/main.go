@@ -47,6 +47,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/audit"
 	"github.com/ArangoGutierrez/agent-identity-protocol/proxy/pkg/dlp"
@@ -219,12 +220,27 @@ func main() {
 		logger.Fatalf("Failed to start proxy: %v", err)
 	}
 
-	// Handle shutdown signals
+	// Handle shutdown signals with graceful termination
+	// IMPORTANT: Send SIGTERM first, wait for graceful exit, then force kill
 	go func() {
 		sig := <-sigChan
-		logger.Printf("Received signal %v, shutting down...", sig)
-		cancel()
+		logger.Printf("Received signal %v, initiating graceful shutdown...", sig)
+
+		// Step 1: Request graceful shutdown (sends SIGTERM to subprocess)
 		proxy.Shutdown()
+
+		// Step 2: Give subprocess time to exit gracefully
+		// The proxy.Run() loop will detect subprocess exit via cmd.Wait()
+		gracefulTimeout := time.After(10 * time.Second)
+
+		select {
+		case <-gracefulTimeout:
+			// Subprocess didn't exit in time, force kill via context cancellation
+			logger.Printf("Graceful shutdown timeout, forcing termination...")
+			cancel()
+		case <-proxy.ctx.Done():
+			// Context already done (subprocess exited or other cancellation)
+		}
 	}()
 
 	// Run the proxy (blocks until subprocess exits)
@@ -422,7 +438,7 @@ func (p *Proxy) Run() int {
 
 	// Start the upstream goroutine (Client → Server)
 	// This intercepts stdin, applies policy, forwards or blocks
-	p.wg.Add(1)
+	// p.wg.Add(1) // FIX: Don't wait for Upstream (prevents deadlock)
 	go p.handleUpstream()
 
 	// Wait for subprocess to exit
@@ -491,6 +507,14 @@ func (p *Proxy) handleDownstream() {
 
 		if p.cfg.Verbose {
 			p.logger.Printf("← [downstream raw] %s", strings.TrimSpace(string(line)))
+		}
+
+		// STREAM SAFETY: Filter non-JSON output (e.g. server logs) to stderr
+		// JSON-RPC messages must start with '{'
+		trimmed := strings.TrimSpace(string(line))
+		if len(trimmed) > 0 && !strings.HasPrefix(trimmed, "{") {
+			p.logger.Printf("[subprocess stdout] %s", trimmed)
+			continue
 		}
 
 		// Apply DLP scanning if enabled
@@ -688,7 +712,7 @@ func (p *Proxy) reconstructResponse(originalLine []byte, redactedContent []struc
 //   - Operational logs go to stderr via logger
 //   - NEVER use fmt.Println, log.Println, or similar that write to stdout
 func (p *Proxy) handleUpstream() {
-	defer p.wg.Done()
+	// defer p.wg.Done() // FIX: Don't wait for Upstream (prevents deadlock)
 	defer func() { _ = p.subStdin.Close() }() // Close subprocess stdin when we're done
 
 	reader := bufio.NewReader(os.Stdin)
@@ -731,6 +755,21 @@ func (p *Proxy) handleUpstream() {
 
 			decision := p.engine.IsAllowed(toolName, toolArgs)
 
+			// REDACTION: Sanitize arguments before audit logging
+			// We create a copy to avoid modifying the original args used for policy checks
+			logArgs := make(map[string]any, len(toolArgs))
+			for k, v := range toolArgs {
+				logArgs[k] = v
+			}
+			if p.dlpScanner != nil && p.dlpScanner.IsEnabled() {
+				for k, v := range logArgs {
+					if str, ok := v.(string); ok {
+						redacted, _ := p.dlpScanner.Redact(str)
+						logArgs[k] = redacted
+					}
+				}
+			}
+
 			// Handle Human-in-the-Loop (ASK) action first
 			if decision.Action == policy.ActionAsk {
 				p.logger.Printf("ASK: Requesting user approval for tool %q...", toolName)
@@ -743,7 +782,7 @@ func (p *Proxy) handleUpstream() {
 					p.logger.Printf("ASK_APPROVED: User approved tool %q", toolName)
 					p.auditLogger.LogToolCall(
 						toolName,
-						toolArgs,
+						logArgs, // Use redacted args
 						audit.DecisionAllow,
 						false, // Not a violation - user explicitly approved
 						"",
@@ -754,7 +793,7 @@ func (p *Proxy) handleUpstream() {
 					p.logger.Printf("ASK_DENIED: User denied tool %q (or timeout)", toolName)
 					p.auditLogger.LogToolCall(
 						toolName,
-						toolArgs,
+						logArgs, // Use redacted args
 						audit.DecisionBlock,
 						true, // Treat as violation for audit purposes
 						"",
@@ -780,7 +819,7 @@ func (p *Proxy) handleUpstream() {
 				// Log to audit file (NEVER to stdout)
 				p.auditLogger.LogToolCall(
 					toolName,
-					toolArgs,
+					logArgs, // Use redacted args
 					auditDecision,
 					decision.ViolationDetected,
 					decision.FailedArg,
@@ -794,7 +833,7 @@ func (p *Proxy) handleUpstream() {
 						p.logger.Printf("RATE_LIMITED: Tool %q exceeded rate limit", toolName)
 						p.auditLogger.LogToolCall(
 							toolName,
-							toolArgs,
+							logArgs, // Use redacted args
 							audit.DecisionRateLimited,
 							true,
 							"",
