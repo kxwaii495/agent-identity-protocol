@@ -1,5 +1,7 @@
 # Agent Identity Protocol (AIP)
 
+> **The firewall between AI agents and your infrastructure.**
+
 **"Sudo for AI Agents" — The Zero-Trust Security Layer for Autonomous Agents**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -7,6 +9,8 @@
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev/)
 [![CI](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/ArangoGutierrez/agent-identity-protocol/actions/workflows/ci.yml)
 [![Status](https://img.shields.io/badge/Status-Alpha-orange.svg)]()
+[![Go Report Card](https://goreportcard.com/badge/github.com/ArangoGutierrez/agent-identity-protocol)](https://goreportcard.com/report/github.com/ArangoGutierrez/agent-identity-protocol)
+[![codecov](https://codecov.io/gh/ArangoGutierrez/agent-identity-protocol/branch/main/graph/badge.svg)](https://codecov.io/gh/ArangoGutierrez/agent-identity-protocol)
 
 ---
 
@@ -18,7 +22,7 @@ Modern AI agents operate with **unrestricted access** to powerful tools. When yo
 
 | Threat | Description | Real-World Example |
 |--------|-------------|-------------------|
-| **Indirect Prompt Injection** | Malicious instructions embedded in data the agent processes | *GeminiJack* (2024): Attackers embedded prompts in Google Docs that hijacked Gemini's actions |
+| **Indirect Prompt Injection** | Malicious instructions embedded in data the agent processes | [*GeminiJack*](https://embrace-the-red.com/blog/gemini-jack/) (2024): Attackers embedded prompts in Google Docs that hijacked Gemini's actions |
 | **Consent Fatigue** | Users approve broad permissions without understanding scope | "Allow GitHub access" grants `repo:delete`, not just `repo:read` |
 | **Shadow AI** | Agents operating outside enterprise security boundaries | Developers running local Copilot instances with production credentials |
 | **Privilege Escalation** | Agents accumulating permissions across tool calls | Agent chains: Slack → Calendar → Email → sends unauthorized messages |
@@ -249,6 +253,19 @@ Every tool call is logged with full context for forensic analysis:
 | **Human-in-the-Loop** | Not supported | Configurable approval gates |
 | **Blast Radius** | Unlimited | Scoped to manifest |
 | **Compliance** | Manual attestation | Policy-as-code, auditable |
+
+---
+
+## Why AIP? (Comparison)
+
+| Approach | Authentication | Authorization | Audit | Revocation |
+|----------|---------------|---------------|-------|------------|
+| **Raw API Keys** | Static token | None | App logs | Rotate everywhere |
+| **OAuth Scopes** | Token-based | Coarse-grained | Varies | Token expiry |
+| **Service Mesh (Istio)** | mTLS | Service-level | Yes | Certificate rotation |
+| **AIP** | Short-lived OIDC | Per-action policy | Immutable trail | Instant session kill |
+
+AIP is purpose-built for the unique challenge of non-deterministic AI agents executing user intent.
 
 ---
 

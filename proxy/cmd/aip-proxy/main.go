@@ -397,6 +397,8 @@ func NewProxy(ctx context.Context, cfg *Config, engine *policy.Engine, logger *l
 		if dlpScanner.DetectsEncoding() {
 			logger.Printf("DLP encoding detection enabled (base64/hex)")
 		}
+	} else {
+		logger.Printf("WARNING: DLP is disabled. Tool arguments may contain secrets that will be logged unredacted to the audit file.")
 	}
 
 	// Configure subprocess stderr - optionally filtered through DLP
