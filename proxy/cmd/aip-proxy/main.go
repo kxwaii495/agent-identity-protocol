@@ -385,17 +385,7 @@ func NewProxy(ctx context.Context, cfg *Config, engine *policy.Engine, logger *l
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	// Subprocess stderr goes to our stderr for visibility
-	cmd.Stderr = os.Stderr
-
-	// Initialize the user prompter for Human-in-the-Loop approval
-	// Check for headless environment and log a warning
-	prompter := ui.NewPrompter(nil) // Use default config (60s timeout)
-	if ui.IsHeadless() {
-		logger.Printf("Warning: Running in headless environment; action=ask rules will auto-deny")
-	}
-
-	// Initialize DLP scanner for output redaction
+	// Initialize DLP scanner for output redaction (needed before stderr setup)
 	var dlpScanner *dlp.Scanner
 	dlpCfg := engine.GetDLPConfig()
 	if dlpCfg != nil && dlpCfg.IsEnabled() {
@@ -404,7 +394,29 @@ func NewProxy(ctx context.Context, cfg *Config, engine *policy.Engine, logger *l
 			return nil, fmt.Errorf("failed to initialize DLP scanner: %w", err)
 		}
 		logger.Printf("DLP enabled with %d patterns: %v", dlpScanner.PatternCount(), dlpScanner.PatternNames())
+		if dlpScanner.DetectsEncoding() {
+			logger.Printf("DLP encoding detection enabled (base64/hex)")
+		}
 	}
+
+	// Configure subprocess stderr - optionally filtered through DLP
+	// This prevents secrets from leaking through error logs
+	if dlpCfg != nil && dlpCfg.FilterStderr && dlpScanner != nil {
+		cmd.Stderr = dlp.NewFilteredWriter(os.Stderr, dlpScanner, logger, "[subprocess]")
+		logger.Printf("DLP stderr filtering enabled")
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+
+	// Initialize the user prompter for Human-in-the-Loop approval
+	// Check for headless environment and log a warning
+	prompter := ui.NewPrompter(nil) // Use default config (60s timeout, rate limiting)
+	prompter.SetLogger(logger.Printf) // Enable rate limit warnings
+	if ui.IsHeadless() {
+		logger.Printf("Warning: Running in headless environment; action=ask rules will auto-deny")
+	}
+	logger.Printf("Approval rate limiting: max %d prompts/minute, %v cooldown",
+		ui.DefaultMaxPromptsPerMinute, ui.DefaultCooldownDuration)
 
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
@@ -458,10 +470,30 @@ func (p *Proxy) Run() int {
 }
 
 // Shutdown performs graceful termination of the subprocess.
+//
+// IMPORTANT: Signal Propagation Limitations
+//
+// This sends SIGTERM to the direct child process. However, signals may not
+// propagate correctly in all scenarios:
+//
+//   - Direct binary: Signal propagates correctly
+//   - Shell wrapper: Signal may only kill the shell, not child processes
+//   - Docker container: Signal goes to `docker` CLI, not the container
+//
+// For Docker targets, users should use:
+//
+//	docker run --rm --init -i <image>
+//
+// The --rm flag removes the container on exit, --init ensures proper signal
+// handling inside the container, and -i keeps stdin open for JSON-RPC.
+//
+// See examples/docker-wrapper.yaml for a complete Docker policy example.
 func (p *Proxy) Shutdown() {
 	if p.cmd.Process != nil {
 		p.logger.Printf("Terminating subprocess PID %d", p.cmd.Process.Pid)
 		// Send SIGTERM first for graceful shutdown
+		// NOTE: For Docker targets, this signals the docker CLI, not the container.
+		// Use --rm --init flags on docker run to ensure proper cleanup.
 		_ = p.cmd.Process.Signal(syscall.SIGTERM)
 	}
 }
@@ -747,7 +779,20 @@ func (p *Proxy) handleUpstream() {
 			p.logger.Printf("→ [upstream] method=%s id=%s", req.Method, string(req.ID))
 		}
 
-		// POLICY CHECK: Is this a tool call that needs authorization?
+		// FIRST LINE OF DEFENSE: Method-level policy check
+		// This prevents bypass attacks via uncontrolled MCP methods like
+		// resources/read, prompts/get, etc.
+		methodDecision := p.engine.IsMethodAllowed(req.Method)
+		if !methodDecision.Allowed {
+			p.logger.Printf("BLOCKED_METHOD: Method %q not allowed by policy (%s)",
+				req.Method, methodDecision.Reason)
+			p.auditLogger.LogMethodBlock(req.Method, methodDecision.Reason)
+			p.sendErrorResponse(protocol.NewMethodNotAllowedError(req.ID, req.Method))
+			continue // Do not forward to subprocess
+		}
+
+		// SECOND LINE OF DEFENSE: Tool-level policy check
+		// This applies to tools/call requests and validates tool names and arguments
 		if req.IsToolCall() {
 			toolName := req.GetToolName()
 			toolArgs := req.GetToolArgs()
@@ -756,17 +801,23 @@ func (p *Proxy) handleUpstream() {
 			decision := p.engine.IsAllowed(toolName, toolArgs)
 
 			// REDACTION: Sanitize arguments before audit logging
-			// We create a copy to avoid modifying the original args used for policy checks
-			logArgs := make(map[string]any, len(toolArgs))
-			for k, v := range toolArgs {
-				logArgs[k] = v
-			}
+			// Use deep scanning to catch secrets in nested structures like:
+			//   {"config": {"aws": {"key": "AKIAIOSFODNN7EXAMPLE"}}}
+			// The shallow scan would miss this; RedactMap catches it.
+			var logArgs map[string]any
 			if p.dlpScanner != nil && p.dlpScanner.IsEnabled() {
-				for k, v := range logArgs {
-					if str, ok := v.(string); ok {
-						redacted, _ := p.dlpScanner.Redact(str)
-						logArgs[k] = redacted
-					}
+				var dlpEvents []dlp.RedactionEvent
+				logArgs, dlpEvents = p.dlpScanner.RedactMap(toolArgs)
+				// Log DLP events from argument scanning
+				for _, event := range dlpEvents {
+					p.logger.Printf("DLP_TRIGGERED (args): Rule %q matched %d time(s) in tool arguments",
+						event.RuleName, event.MatchCount)
+				}
+			} else {
+				// No DLP scanner - use original args (make a shallow copy for safety)
+				logArgs = make(map[string]any, len(toolArgs))
+				for k, v := range toolArgs {
+					logArgs[k] = v
 				}
 			}
 
@@ -840,6 +891,15 @@ func (p *Proxy) handleUpstream() {
 							"",
 						)
 						p.sendErrorResponse(protocol.NewRateLimitedError(req.ID, toolName))
+						continue // Do not forward to subprocess
+					}
+					// Check for protected path access (security-critical event)
+					if decision.Action == policy.ActionProtectedPath {
+						p.logger.Printf("BLOCKED_PROTECTED_PATH: Tool %q attempted to access protected path %q",
+							toolName, decision.ProtectedPath)
+						// Log to audit with dedicated method for forensic analysis
+						p.auditLogger.LogProtectedPathBlock(toolName, decision.ProtectedPath, logArgs)
+						p.sendErrorResponse(protocol.NewProtectedPathError(req.ID, toolName, decision.ProtectedPath))
 						continue // Do not forward to subprocess
 					}
 					// BLOCKED (enforce mode with violation)
