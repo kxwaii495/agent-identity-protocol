@@ -48,3 +48,7 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+          # Don't fail the workflow if upload fails (code scanning may not be enabled)
+          # To enable: Settings → Code security and analysis → Code scanning
+          upload: always
+        continue-on-error: true
