@@ -87,6 +87,17 @@ type PolicySpec struct {
 	// Takes precedence over AllowedTools (deny wins).
 	// TODO: Implement in v0.2
 	DeniedTools []string `yaml:"denied_tools,omitempty"`
+
+	// Mode controls policy enforcement behavior.
+	// Values:
+	//   - "enforce" (default): Violations are blocked, error returned to client
+	//   - "monitor": Violations are logged but allowed through (dry run mode)
+	//
+	// Monitor mode is useful for:
+	//   - Testing new policies before enforcement
+	//   - Understanding agent behavior in production
+	//   - Gradual policy rollout
+	Mode string `yaml:"mode,omitempty"`
 }
 
 // ToolRule defines argument-level validation for a specific tool.
@@ -118,6 +129,14 @@ type ToolRule struct {
 // Policy Engine
 // -----------------------------------------------------------------------------
 
+// PolicyMode constants for enforcement behavior.
+const (
+	// ModeEnforce blocks violations and returns errors to client (default).
+	ModeEnforce = "enforce"
+	// ModeMonitor logs violations but allows requests through (dry run).
+	ModeMonitor = "monitor"
+)
+
 // Engine evaluates tool calls against the loaded policy.
 //
 // The engine is the "brain" of the AIP proxy. It maintains the parsed policy
@@ -136,6 +155,10 @@ type Engine struct {
 	// toolRules provides O(1) lookup for tool-specific argument rules.
 	// Key = normalized tool name, Value = ToolRule with compiled regexes.
 	toolRules map[string]*ToolRule
+
+	// mode controls enforcement behavior: "enforce" (default) or "monitor".
+	// In monitor mode, violations are logged but allowed through.
+	mode string
 }
 
 // NewEngine creates a new policy engine instance.
@@ -202,6 +225,15 @@ func (e *Engine) Load(data []byte) error {
 		e.allowedSet[normalized] = struct{}{}
 	}
 
+	// Set enforcement mode (default to enforce if not specified)
+	e.mode = strings.ToLower(strings.TrimSpace(policy.Spec.Mode))
+	if e.mode == "" {
+		e.mode = ModeEnforce
+	}
+	if e.mode != ModeEnforce && e.mode != ModeMonitor {
+		return fmt.Errorf("invalid mode %q, must be 'enforce' or 'monitor'", policy.Spec.Mode)
+	}
+
 	e.policy = &policy
 	return nil
 }
@@ -215,12 +247,39 @@ func (e *Engine) LoadFromFile(path string) error {
 	return e.Load(data)
 }
 
-// ValidationResult contains the result of a tool call authorization check.
-type ValidationResult struct {
-	Allowed    bool   // Whether the tool call is permitted
-	FailedArg  string // Name of the argument that failed validation (if any)
-	FailedRule string // The regex pattern that failed to match (if any)
+// Decision contains the result of a tool call authorization check.
+//
+// This struct supports both enforce and monitor modes:
+//   - In enforce mode: Allowed=false means the request is blocked
+//   - In monitor mode: Allowed=true but ViolationDetected=true means
+//     the request passed through but would have been blocked
+//
+// The ViolationDetected field is critical for audit logging to identify
+// "dry run blocks" in monitor mode.
+type Decision struct {
+	// Allowed indicates if the request should be forwarded to the server.
+	// In enforce mode: false = blocked
+	// In monitor mode: always true (violations pass through)
+	Allowed bool
+
+	// ViolationDetected indicates if a policy violation was found.
+	// true = policy would block this request (or did block in enforce mode)
+	// This field is essential for audit logging in monitor mode.
+	ViolationDetected bool
+
+	// FailedArg is the name of the argument that failed validation (if any).
+	FailedArg string
+
+	// FailedRule is the regex pattern that failed to match (if any).
+	FailedRule string
+
+	// Reason provides a human-readable explanation of the decision.
+	Reason string
 }
+
+// ValidationResult is an alias for Decision for backward compatibility.
+// Deprecated: Use Decision instead.
+type ValidationResult = Decision
 
 // IsAllowed checks if the given tool name and arguments are permitted by policy.
 //
@@ -229,26 +288,39 @@ type ValidationResult struct {
 //
 //  1. Check if tool is in allowed_tools list (O(1) lookup)
 //  2. If tool has argument rules in tool_rules, validate each argument
-//  3. Return detailed ValidationResult for error reporting
+//  3. Return detailed Decision for error reporting and audit logging
 //
 // Tool names are normalized to lowercase for case-insensitive matching.
 //
 // Authorization Logic:
-//   - Tool not in allowed_tools → Deny
+//   - Tool not in allowed_tools → Violation detected
 //   - Tool allowed, no argument rules → Allow (implicit allow all args)
 //   - Tool allowed, has argument rules → Validate each constrained arg
-//   - Any argument fails regex match → Deny with details
+//   - Any argument fails regex match → Violation detected
+//
+// Monitor Mode Behavior:
+//   - When mode="monitor", violations set ViolationDetected=true but Allowed=true
+//   - This enables "dry run" testing of policies before enforcement
+//   - The proxy should log these as "ALLOW_MONITOR" decisions
 //
 // Example:
 //
-//	result := engine.IsAllowed("fetch_url", map[string]any{"url": "https://evil.com"})
-//	if !result.Allowed {
-//	    // Return JSON-RPC Forbidden error with result.FailedArg
+//	decision := engine.IsAllowed("fetch_url", map[string]any{"url": "https://evil.com"})
+//	if decision.ViolationDetected {
+//	    if !decision.Allowed {
+//	        // ENFORCE mode: Return JSON-RPC Forbidden error
+//	    } else {
+//	        // MONITOR mode: Log violation but forward request
+//	    }
 //	}
-func (e *Engine) IsAllowed(toolName string, args map[string]any) ValidationResult {
+func (e *Engine) IsAllowed(toolName string, args map[string]any) Decision {
 	if e.allowedSet == nil {
 		// No policy loaded = deny all (fail closed)
-		return ValidationResult{Allowed: false}
+		return Decision{
+			Allowed:           false,
+			ViolationDetected: true,
+			Reason:            "no policy loaded",
+		}
 	}
 
 	// Normalize tool name for case-insensitive comparison
@@ -256,14 +328,18 @@ func (e *Engine) IsAllowed(toolName string, args map[string]any) ValidationResul
 
 	// Step 1: Check if tool is in allowed list
 	if _, allowed := e.allowedSet[normalized]; !allowed {
-		return ValidationResult{Allowed: false}
+		return e.makeDecision(false, "tool not in allowed_tools list", "", "")
 	}
 
 	// Step 2: Check for argument-level rules
 	rule, hasRule := e.toolRules[normalized]
 	if !hasRule || len(rule.compiledArgs) == 0 {
 		// No argument rules = implicit allow all args
-		return ValidationResult{Allowed: true}
+		return Decision{
+			Allowed:           true,
+			ViolationDetected: false,
+			Reason:            "tool allowed, no argument constraints",
+		}
 	}
 
 	// Step 3: Validate each constrained argument
@@ -272,11 +348,7 @@ func (e *Engine) IsAllowed(toolName string, args map[string]any) ValidationResul
 		if !exists {
 			// Argument not provided - this is a policy decision.
 			// For security, we require constrained args to be present.
-			return ValidationResult{
-				Allowed:    false,
-				FailedArg:  argName,
-				FailedRule: rule.AllowArgs[argName],
-			}
+			return e.makeDecision(false, "required argument missing", argName, rule.AllowArgs[argName])
 		}
 
 		// Convert argument value to string for regex matching
@@ -284,16 +356,53 @@ func (e *Engine) IsAllowed(toolName string, args map[string]any) ValidationResul
 
 		// Validate against the compiled regex
 		if !compiledRegex.MatchString(strValue) {
-			return ValidationResult{
-				Allowed:    false,
-				FailedArg:  argName,
-				FailedRule: rule.AllowArgs[argName],
-			}
+			return e.makeDecision(false, "argument failed regex validation", argName, rule.AllowArgs[argName])
 		}
 	}
 
 	// All argument validations passed
-	return ValidationResult{Allowed: true}
+	return Decision{
+		Allowed:           true,
+		ViolationDetected: false,
+		Reason:            "tool and arguments permitted",
+	}
+}
+
+// makeDecision creates a Decision based on violation and current mode.
+//
+// In enforce mode: violations result in Allowed=false
+// In monitor mode: violations result in Allowed=true, ViolationDetected=true
+func (e *Engine) makeDecision(wouldAllow bool, reason, failedArg, failedRule string) Decision {
+	if wouldAllow {
+		return Decision{
+			Allowed:           true,
+			ViolationDetected: false,
+			Reason:            reason,
+			FailedArg:         failedArg,
+			FailedRule:        failedRule,
+		}
+	}
+
+	// Violation detected
+	if e.mode == ModeMonitor {
+		// Monitor mode: allow through but flag as violation
+		return Decision{
+			Allowed:           true,
+			ViolationDetected: true,
+			Reason:            reason + " (monitor mode: allowed for dry run)",
+			FailedArg:         failedArg,
+			FailedRule:        failedRule,
+		}
+	}
+
+	// Enforce mode: block the request
+	return Decision{
+		Allowed:           false,
+		ViolationDetected: true,
+		Reason:            reason,
+		FailedArg:         failedArg,
+		FailedRule:        failedRule,
+	}
 }
 
 // argToString converts an argument value to string for regex matching.
@@ -319,6 +428,19 @@ func (e *Engine) GetPolicyName() string {
 		return "<no policy>"
 	}
 	return e.policy.Metadata.Name
+}
+
+// GetMode returns the current enforcement mode ("enforce" or "monitor").
+func (e *Engine) GetMode() string {
+	if e.mode == "" {
+		return ModeEnforce
+	}
+	return e.mode
+}
+
+// IsMonitorMode returns true if the engine is in monitor/dry-run mode.
+func (e *Engine) IsMonitorMode() bool {
+	return e.mode == ModeMonitor
 }
 
 // GetAllowedTools returns a copy of the allowed tools list for inspection.

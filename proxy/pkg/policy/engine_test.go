@@ -298,3 +298,287 @@ spec:
 		t.Error("Expected fetch_url to be implicitly allowed via tool_rules")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Monitor Mode Tests (Phase 4)
+// -----------------------------------------------------------------------------
+
+// TestMonitorModeAllowsViolations tests that monitor mode allows through
+// requests that would otherwise be blocked, but flags ViolationDetected.
+func TestMonitorModeAllowsViolations(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: monitor-mode-test
+spec:
+  mode: monitor
+  allowed_tools:
+    - safe_tool
+`
+
+	engine := NewEngine()
+	if err := engine.Load([]byte(policyYAML)); err != nil {
+		t.Fatalf("Failed to load policy: %v", err)
+	}
+
+	// Verify mode is set correctly
+	if engine.GetMode() != ModeMonitor {
+		t.Errorf("GetMode() = %q, want %q", engine.GetMode(), ModeMonitor)
+	}
+	if !engine.IsMonitorMode() {
+		t.Error("IsMonitorMode() = false, want true")
+	}
+
+	tests := []struct {
+		name              string
+		tool              string
+		wantAllowed       bool
+		wantViolation     bool
+	}{
+		{
+			name:              "Allowed tool - no violation",
+			tool:              "safe_tool",
+			wantAllowed:       true,
+			wantViolation:     false,
+		},
+		{
+			name:              "Blocked tool - allowed in monitor mode with violation flag",
+			tool:              "dangerous_tool",
+			wantAllowed:       true,  // MONITOR: allowed through
+			wantViolation:     true,  // but flagged as violation
+		},
+		{
+			name:              "Another blocked tool - same behavior",
+			tool:              "rm_rf_slash",
+			wantAllowed:       true,
+			wantViolation:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision := engine.IsAllowed(tt.tool, nil)
+
+			if decision.Allowed != tt.wantAllowed {
+				t.Errorf("Allowed = %v, want %v", decision.Allowed, tt.wantAllowed)
+			}
+			if decision.ViolationDetected != tt.wantViolation {
+				t.Errorf("ViolationDetected = %v, want %v", decision.ViolationDetected, tt.wantViolation)
+			}
+		})
+	}
+}
+
+// TestEnforceModeBlocksViolations tests that enforce mode (default) blocks
+// violations and sets ViolationDetected appropriately.
+func TestEnforceModeBlocksViolations(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: enforce-mode-test
+spec:
+  mode: enforce
+  allowed_tools:
+    - safe_tool
+`
+
+	engine := NewEngine()
+	if err := engine.Load([]byte(policyYAML)); err != nil {
+		t.Fatalf("Failed to load policy: %v", err)
+	}
+
+	// Verify mode is set correctly
+	if engine.GetMode() != ModeEnforce {
+		t.Errorf("GetMode() = %q, want %q", engine.GetMode(), ModeEnforce)
+	}
+	if engine.IsMonitorMode() {
+		t.Error("IsMonitorMode() = true, want false")
+	}
+
+	tests := []struct {
+		name              string
+		tool              string
+		wantAllowed       bool
+		wantViolation     bool
+	}{
+		{
+			name:              "Allowed tool - no violation",
+			tool:              "safe_tool",
+			wantAllowed:       true,
+			wantViolation:     false,
+		},
+		{
+			name:              "Blocked tool - denied with violation flag",
+			tool:              "dangerous_tool",
+			wantAllowed:       false, // ENFORCE: blocked
+			wantViolation:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision := engine.IsAllowed(tt.tool, nil)
+
+			if decision.Allowed != tt.wantAllowed {
+				t.Errorf("Allowed = %v, want %v", decision.Allowed, tt.wantAllowed)
+			}
+			if decision.ViolationDetected != tt.wantViolation {
+				t.Errorf("ViolationDetected = %v, want %v", decision.ViolationDetected, tt.wantViolation)
+			}
+		})
+	}
+}
+
+// TestDefaultModeIsEnforce tests that omitting mode defaults to enforce.
+func TestDefaultModeIsEnforce(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: default-mode-test
+spec:
+  # mode not specified - should default to enforce
+  allowed_tools:
+    - safe_tool
+`
+
+	engine := NewEngine()
+	if err := engine.Load([]byte(policyYAML)); err != nil {
+		t.Fatalf("Failed to load policy: %v", err)
+	}
+
+	if engine.GetMode() != ModeEnforce {
+		t.Errorf("Default mode = %q, want %q", engine.GetMode(), ModeEnforce)
+	}
+
+	// Verify enforce behavior: blocked tool is denied
+	decision := engine.IsAllowed("blocked_tool", nil)
+	if decision.Allowed {
+		t.Error("Default mode should block disallowed tools, but Allowed=true")
+	}
+	if !decision.ViolationDetected {
+		t.Error("ViolationDetected should be true for blocked tool")
+	}
+}
+
+// TestInvalidModeReturnsError tests that invalid mode values cause Load() to fail.
+func TestInvalidModeReturnsError(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: invalid-mode-test
+spec:
+  mode: invalid_mode
+  allowed_tools:
+    - safe_tool
+`
+
+	engine := NewEngine()
+	err := engine.Load([]byte(policyYAML))
+
+	if err == nil {
+		t.Error("Expected Load() to fail with invalid mode, but it succeeded")
+	}
+}
+
+// TestMonitorModeWithArgValidation tests monitor mode with argument-level
+// validation failures.
+func TestMonitorModeWithArgValidation(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: monitor-args-test
+spec:
+  mode: monitor
+  tool_rules:
+    - tool: fetch_url
+      allow_args:
+        url: "^https://github\\.com/.*"
+`
+
+	engine := NewEngine()
+	if err := engine.Load([]byte(policyYAML)); err != nil {
+		t.Fatalf("Failed to load policy: %v", err)
+	}
+
+	tests := []struct {
+		name              string
+		args              map[string]any
+		wantAllowed       bool
+		wantViolation     bool
+		wantFailedArg     string
+	}{
+		{
+			name:              "Valid GitHub URL - no violation",
+			args:              map[string]any{"url": "https://github.com/my-repo"},
+			wantAllowed:       true,
+			wantViolation:     false,
+			wantFailedArg:     "",
+		},
+		{
+			name:              "Attacker URL - allowed in monitor but flagged",
+			args:              map[string]any{"url": "https://evil.com/steal"},
+			wantAllowed:       true,  // MONITOR: allowed through
+			wantViolation:     true,  // flagged as violation
+			wantFailedArg:     "url",
+		},
+		{
+			name:              "Missing URL - allowed in monitor but flagged",
+			args:              map[string]any{},
+			wantAllowed:       true,
+			wantViolation:     true,
+			wantFailedArg:     "url",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision := engine.IsAllowed("fetch_url", tt.args)
+
+			if decision.Allowed != tt.wantAllowed {
+				t.Errorf("Allowed = %v, want %v", decision.Allowed, tt.wantAllowed)
+			}
+			if decision.ViolationDetected != tt.wantViolation {
+				t.Errorf("ViolationDetected = %v, want %v", decision.ViolationDetected, tt.wantViolation)
+			}
+			if tt.wantFailedArg != "" && decision.FailedArg != tt.wantFailedArg {
+				t.Errorf("FailedArg = %q, want %q", decision.FailedArg, tt.wantFailedArg)
+			}
+		})
+	}
+}
+
+// TestDecisionReason tests that decisions include helpful reason strings.
+func TestDecisionReason(t *testing.T) {
+	policyYAML := `
+apiVersion: aip.io/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: reason-test
+spec:
+  mode: monitor
+  allowed_tools:
+    - allowed_tool
+`
+
+	engine := NewEngine()
+	if err := engine.Load([]byte(policyYAML)); err != nil {
+		t.Fatalf("Failed to load policy: %v", err)
+	}
+
+	// Test that reason is populated
+	decision := engine.IsAllowed("blocked_tool", nil)
+	if decision.Reason == "" {
+		t.Error("Decision.Reason should not be empty")
+	}
+
+	// Allowed tool should also have a reason
+	decision = engine.IsAllowed("allowed_tool", nil)
+	if decision.Reason == "" {
+		t.Error("Decision.Reason should not be empty for allowed tools")
+	}
+}
