@@ -1,0 +1,378 @@
+name: "Server Endpoint Tests"
+description: "Tests for AIP server-side validation endpoints (v1alpha2)"
+api_version: "aip.io/v1alpha2"
+conformance_level: "server"
+
+tests:
+  # Validation Endpoint - Success Cases
+  - id: "server-001"
+    description: "Validation endpoint returns allow for permitted tool"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: server-test
+      spec:
+        allowed_tools:
+          - read_file
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Content-Type: "application/json"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 200
+      body:
+        decision: "allow"
+
+  - id: "server-002"
+    description: "Validation endpoint returns block for denied tool"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: server-deny-test
+      spec:
+        allowed_tools:
+          - read_file
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body:
+        tool: "delete_file"  # Not in allowed_tools
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 200
+      body:
+        decision: "block"
+        reason: "Tool not in allowed_tools list"
+
+  - id: "server-003"
+    description: "Validation endpoint returns ask for action:ask tools"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: server-ask-test
+      spec:
+        allowed_tools:
+          - dangerous_tool
+        tool_rules:
+          - tool: dangerous_tool
+            action: ask
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body:
+        tool: "dangerous_tool"
+        arguments: {}
+    expected:
+      http_status: 200
+      body:
+        decision: "ask"
+
+  # Validation Endpoint - Violations
+  - id: "server-010"
+    description: "Validation endpoint returns violations array"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: violations-test
+      spec:
+        allowed_tools:
+          - file_write
+        tool_rules:
+          - tool: file_write
+            action: allow
+            allow_args:
+              path: "^/allowed/.*"
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body:
+        tool: "file_write"
+        arguments:
+          path: "/etc/passwd"  # Violates regex
+    expected:
+      http_status: 200
+      body:
+        decision: "block"
+        violations:
+          - type: "argument_validation"
+            field: "path"
+            message: "Value does not match pattern: ^/allowed/.*"
+
+  - id: "server-011"
+    description: "Validation endpoint detects protected path violation"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: protected-path-test
+      spec:
+        allowed_tools:
+          - read_file
+        protected_paths:
+          - "~/.ssh"
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "~/.ssh/id_rsa"
+    expected:
+      http_status: 200
+      body:
+        decision: "block"
+        violations:
+          - type: "protected_path"
+            field: "path"
+
+  # Token Status in Response
+  - id: "server-020"
+    description: "Validation endpoint returns token status when token provided"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: token-status-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer ${VALID_TOKEN}"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+        token: "${VALID_TOKEN}"
+    expected:
+      http_status: 200
+      body:
+        decision: "allow"
+        token_status:
+          valid: true
+          expires_in: ">0"  # Positive seconds remaining
+
+  # Health Endpoint
+  - id: "server-030"
+    description: "Health endpoint returns healthy status"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: health-test
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "GET"
+      path: "/health"
+    expected:
+      http_status: 200
+      body:
+        status: "healthy"
+        version: "v1alpha2"
+        policy_hash_length: 64
+
+  - id: "server-031"
+    description: "Health endpoint includes uptime"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: uptime-test
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "GET"
+      path: "/health"
+    expected:
+      http_status: 200
+      body:
+        uptime_seconds: ">=0"
+
+  # Metrics Endpoint
+  - id: "server-040"
+    description: "Metrics endpoint returns Prometheus format"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: metrics-test
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "GET"
+      path: "/metrics"
+    expected:
+      http_status: 200
+      content_type: "text/plain"
+      body_contains:
+        - "aip_requests_total"
+        - "aip_decisions_total"
+
+  # Custom Endpoint Paths
+  - id: "server-050"
+    description: "Custom endpoint paths are honored"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: custom-paths
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+          endpoints:
+            validate: "/api/v2/check"
+            health: "/status"
+            metrics: "/prometheus"
+    tests:
+      - http_request:
+          method: "POST"
+          path: "/api/v2/check"
+          body:
+            tool: "test_tool"
+            arguments: {}
+        expected:
+          http_status: 200
+      - http_request:
+          method: "GET"
+          path: "/status"
+        expected:
+          http_status: 200
+      - http_request:
+          method: "GET"
+          path: "/prometheus"
+        expected:
+          http_status: 200
+
+  # Error Responses
+  - id: "server-060"
+    description: "Invalid request returns 400"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: error-test
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body: "not valid json"
+    expected:
+      http_status: 400
+      body:
+        error: "invalid_request"
+
+  - id: "server-061"
+    description: "Missing required fields returns 400"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: missing-fields
+      spec:
+        allowed_tools:
+          - test_tool
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      body:
+        # Missing 'tool' field
+        arguments: {}
+    expected:
+      http_status: 400
+      body:
+        error: "invalid_request"
+
+  - id: "server-062"
+    description: "Rate limited returns 429"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: rate-limit-test
+      spec:
+        allowed_tools:
+          - limited_tool
+        tool_rules:
+          - tool: limited_tool
+            action: allow
+            rate_limit: "1/second"
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    sequence:
+      - http_request:
+          method: "POST"
+          path: "/v1/validate"
+          body:
+            tool: "limited_tool"
+            arguments: {}
+        expected:
+          http_status: 200
+          body:
+            decision: "allow"
+      - http_request:
+          method: "POST"
+          path: "/v1/validate"
+          body:
+            tool: "limited_tool"
+            arguments: {}
+        expected:
+          http_status: 429
+          body:
+            error: "rate_limited"

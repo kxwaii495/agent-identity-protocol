@@ -1,0 +1,299 @@
+name: "Identity Token Tests"
+description: "Tests for AIP identity token generation and structure (v1alpha2)"
+api_version: "aip.io/v1alpha2"
+conformance_level: "identity"
+
+tests:
+  # Token Generation
+  - id: "identity-001"
+    description: "Token generated when identity.enabled is true"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: identity-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          token_ttl: "5m"
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+    expected:
+      decision: "ALLOW"
+      token_generated: true
+      token_fields:
+        - version
+        - policy_hash
+        - session_id
+        - agent_id
+        - issued_at
+        - expires_at
+        - nonce
+
+  - id: "identity-002"
+    description: "No token generated when identity.enabled is false"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: no-identity
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: false
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+    expected:
+      decision: "ALLOW"
+      token_generated: false
+
+  - id: "identity-003"
+    description: "No token generated when identity section is omitted"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: minimal-policy
+      spec:
+        allowed_tools:
+          - read_file
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+    expected:
+      decision: "ALLOW"
+      token_generated: false
+
+  # Token Structure
+  - id: "identity-010"
+    description: "Token version field matches API version"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: version-test
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+    input:
+      method: "tools/call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token_generated: true
+      token:
+        version: "aip/v1alpha2"
+
+  - id: "identity-011"
+    description: "Token agent_id matches policy metadata.name"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: my-unique-agent
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+    input:
+      method: "tools/call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token:
+        agent_id: "my-unique-agent"
+
+  - id: "identity-012"
+    description: "Token nonce is unique per issuance"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: nonce-test
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+    input:
+      method: "tools/call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token:
+        nonce_length: 32  # 16 bytes hex-encoded
+        nonce_unique: true
+
+  # Token Expiration
+  - id: "identity-020"
+    description: "Token expires_at respects token_ttl"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: ttl-test
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+          token_ttl: "10m"
+    input:
+      method: "tools/call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token:
+        ttl_seconds: 600  # 10 minutes
+
+  - id: "identity-021"
+    description: "Default token_ttl is 5 minutes"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: default-ttl
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+          # token_ttl not specified
+    input:
+      method: "tools/call"
+      tool: "test_tool"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token:
+        ttl_seconds: 300  # 5 minutes
+
+  # Token Rotation
+  - id: "identity-030"
+    description: "Token rotation before expiration"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: rotation-test
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+          token_ttl: "5m"
+          rotation_interval: "4m"
+    sequence:
+      - action: "call"
+        wait: "0s"
+        input:
+          method: "tools/call"
+          tool: "test_tool"
+          args: {}
+        expected:
+          token_id: "token-1"
+      - action: "call"
+        wait: "4m"  # After rotation interval
+        input:
+          method: "tools/call"
+          tool: "test_tool"
+          args: {}
+        expected:
+          token_id: "token-2"  # New token
+          session_preserved: true
+
+  - id: "identity-031"
+    description: "Session ID preserved across token rotation"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: session-preserve
+      spec:
+        allowed_tools:
+          - test_tool
+        identity:
+          enabled: true
+          token_ttl: "1m"
+          rotation_interval: "30s"
+    sequence:
+      - action: "call"
+        wait: "0s"
+        capture:
+          session_id: "initial_session"
+      - action: "call"
+        wait: "35s"
+        expected:
+          session_id: "${initial_session}"  # Same session
+
+  # Policy Hash
+  - id: "identity-040"
+    description: "Policy hash is deterministic"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: hash-test
+      spec:
+        allowed_tools:
+          - tool_a
+          - tool_b
+        identity:
+          enabled: true
+    input:
+      method: "tools/call"
+      tool: "tool_a"
+      args: {}
+    expected:
+      decision: "ALLOW"
+      token:
+        policy_hash_length: 64  # SHA-256 hex
+        policy_hash_deterministic: true
+
+  - id: "identity-041"
+    description: "Policy hash changes when policy changes"
+    policies:
+      - name: "policy-v1"
+        content: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: changing-policy
+          spec:
+            allowed_tools:
+              - tool_a
+            identity:
+              enabled: true
+      - name: "policy-v2"
+        content: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: changing-policy
+          spec:
+            allowed_tools:
+              - tool_a
+              - tool_b  # Added tool
+            identity:
+              enabled: true
+    expected:
+      hash_policy_v1: "different_from_v2"
+      hash_policy_v2: "different_from_v1"

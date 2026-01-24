@@ -6,11 +6,13 @@ This directory contains test vectors for validating AIP implementations.
 
 An implementation claiming AIP conformance MUST pass all tests at their claimed conformance level:
 
-| Level | Test Files |
-|-------|------------|
-| Basic | `basic/*.yaml` |
-| Full | `basic/*.yaml` + `full/*.yaml` |
-| Extended | All test files |
+| Level | Test Files | API Version |
+|-------|------------|-------------|
+| Basic | `basic/*.yaml` | v1alpha1+ |
+| Full | `basic/*.yaml` + `full/*.yaml` | v1alpha1+ |
+| Extended | Basic + Full + `extended/*.yaml` | v1alpha1+ |
+| Identity | Extended + `identity/*.yaml` | v1alpha2+ |
+| Server | Identity + `server/*.yaml` | v1alpha2+ |
 
 ## Test Vector Format
 
@@ -101,6 +103,36 @@ For each test case:
 - Human-in-the-loop behavior
 - Timeout handling
 
+### identity/tokens.yaml (v1alpha2)
+- Token generation
+- Token structure validation
+- Token expiration
+- Token rotation
+
+### identity/sessions.yaml (v1alpha2)
+- Session binding (process, policy, strict)
+- Session lifecycle
+- Policy hash computation
+
+### identity/validation.yaml (v1alpha2)
+- Token validation success/failure
+- Replay detection
+- Policy change detection
+
+### server/endpoints.yaml (v1alpha2)
+- Validation endpoint request/response
+- Health endpoint
+- Metrics endpoint format
+
+### server/authentication.yaml (v1alpha2)
+- Bearer token authentication
+- Token requirement enforcement
+- Error responses
+
+### server/tls.yaml (v1alpha2)
+- TLS requirement for non-localhost
+- Certificate validation
+
 ## Contributing Tests
 
 When adding tests:
@@ -112,6 +144,10 @@ When adding tests:
 ## Versioning
 
 Test vectors are versioned alongside the specification:
-- `v1alpha1/` - Tests for aip.io/v1alpha1
+- `v1alpha1/` - Tests for aip.io/v1alpha1 (Basic, Full, Extended)
+- `v1alpha2/` - Tests for aip.io/v1alpha2 (Identity, Server)
 
 Breaking changes to test vectors require a new version.
+
+Note: v1alpha2 is backward compatible with v1alpha1. Implementations supporting
+v1alpha2 MUST also pass all v1alpha1 tests.

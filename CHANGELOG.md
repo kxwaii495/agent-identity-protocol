@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Specification v1alpha2)
+- **Agent Identity Tokens**: Cryptographic session binding for agent requests
+  - `spec.identity.enabled`: Enable token generation
+  - `spec.identity.token_ttl`: Configurable token lifetime (default: 5m)
+  - `spec.identity.rotation_interval`: Automatic token rotation
+  - `spec.identity.require_token`: Enforce token requirement
+  - `spec.identity.session_binding`: Binding mode (process/policy/strict)
+
+- **Server-Side Validation**: HTTP endpoints for distributed policy enforcement
+  - `spec.server.enabled`: Enable HTTP server
+  - `spec.server.listen`: Configurable address/port
+  - `spec.server.tls`: TLS configuration for HTTPS
+  - `POST /v1/validate`: Policy validation endpoint
+  - `GET /health`: Health check endpoint
+  - `GET /metrics`: Prometheus metrics export
+
+- **Policy Signing**: Cryptographic integrity verification
+  - `metadata.signature`: Ed25519/ECDSA signatures
+  - Signature verification before policy application
+
+- **New Error Codes**:
+  - `-32008`: Token required but not provided
+  - `-32009`: Token validation failed
+  - `-32010`: Policy signature invalid
+
+- **New Conformance Levels**:
+  - `Identity`: Token lifecycle and validation tests
+  - `Server`: HTTP endpoint behavior tests
+
+- **Compatibility with Agentic JWT**: Alignment with IETF draft-goswami-agentic-jwt-00
+  - Policy hash as agent checksum
+  - Session binding for workflow support
+
+### Changed
+- Updated specification from v1alpha1 to v1alpha2
+- Added policy hash computation (SHA-256, canonical JSON)
+- Extended audit log format with session_id, token_id, policy_hash
+
+### References
+- [MCP Authorization (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+- [Agentic JWT (draft-goswami-agentic-jwt-00)](https://datatracker.ietf.org/doc/html/draft-goswami-agentic-jwt-00)
+- [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+
 ## [0.1.0] - 2026-01-20
 
 ### Added

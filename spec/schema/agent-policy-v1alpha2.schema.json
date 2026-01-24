@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aip.io/schema/v1alpha2/agent-policy.schema.json",
+  "title": "AIP AgentPolicy",
+  "description": "Agent Identity Protocol policy document schema (v1alpha2)",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "aip.io/v1alpha2",
+      "description": "API version - must be 'aip.io/v1alpha2'"
+    },
+    "kind": {
+      "type": "string",
+      "const": "AgentPolicy",
+      "description": "Resource kind - must be 'AgentPolicy'"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/PolicySpec"
+    }
+  },
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "description": "Policy metadata",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+          "description": "Unique identifier for this policy (DNS-1123 subdomain)"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9]+)?$",
+          "description": "Semantic version (e.g., '1.0.0', '2.1.0-beta')"
+        },
+        "owner": {
+          "type": "string",
+          "format": "email",
+          "description": "Contact email for policy questions"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^(ed25519|ecdsa-p256):[A-Za-z0-9+/=]+$",
+          "description": "Cryptographic signature for policy integrity (format: algorithm:base64-signature)"
+        }
+      }
+    },
+    "PolicySpec": {
+      "type": "object",
+      "description": "Policy specification",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["enforce", "monitor"],
+          "default": "enforce",
+          "description": "Enforcement mode: 'enforce' blocks violations, 'monitor' logs only"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of tool names the agent may invoke"
+        },
+        "allowed_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of JSON-RPC methods that are permitted"
+        },
+        "denied_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "List of JSON-RPC methods that are explicitly denied"
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "File paths that tools may not access"
+        },
+        "strict_args_default": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, reject undeclared arguments by default"
+        },
+        "tool_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolRule"
+          },
+          "description": "Fine-grained rules for specific tools"
+        },
+        "dlp": {
+          "$ref": "#/$defs/DLPConfig"
+        },
+        "identity": {
+          "$ref": "#/$defs/IdentityConfig"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerConfig"
+        }
+      }
+    },
+    "ToolRule": {
+      "type": "object",
+      "description": "Rule for a specific tool",
+      "required": ["tool"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool name this rule applies to"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["allow", "block", "ask"],
+          "default": "allow",
+          "description": "Action to take: 'allow', 'block', or 'ask' (human approval)"
+        },
+        "rate_limit": {
+          "type": "string",
+          "pattern": "^[0-9]+/(second|sec|s|minute|min|m|hour|hr|h)$",
+          "description": "Rate limit in format 'N/period' (e.g., '10/minute')"
+        },
+        "strict_args": {
+          "type": "boolean",
+          "description": "Override strict_args_default for this tool"
+        },
+        "allow_args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "description": "Regex pattern the argument value must match"
+          },
+          "description": "Map of argument names to regex validation patterns"
+        }
+      }
+    },
+    "DLPConfig": {
+      "type": "object",
+      "description": "Data Loss Prevention configuration",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether DLP scanning is active"
+        },
+        "detect_encoding": {
+          "type": "boolean",
+          "default": false,
+          "description": "Decode base64/hex before scanning"
+        },
+        "filter_stderr": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply DLP to subprocess stderr"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DLPPattern"
+          },
+          "minItems": 1,
+          "description": "List of sensitive data patterns to detect"
+        }
+      },
+      "required": ["patterns"]
+    },
+    "DLPPattern": {
+      "type": "object",
+      "description": "A single DLP detection pattern",
+      "required": ["name", "regex"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Human-readable name for this pattern (used in redaction)"
+        },
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regular expression to match sensitive data"
+        }
+      }
+    },
+    "IdentityConfig": {
+      "type": "object",
+      "description": "Agent identity and token management configuration (v1alpha2)",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable identity token generation and management"
+        },
+        "token_ttl": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "default": "5m",
+          "description": "Token time-to-live (e.g., '5m', '1h', '300s')"
+        },
+        "rotation_interval": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "default": "4m",
+          "description": "Token rotation interval (must be less than token_ttl)"
+        },
+        "require_token": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require identity token for all tool calls"
+        },
+        "session_binding": {
+          "type": "string",
+          "enum": ["process", "policy", "strict"],
+          "default": "process",
+          "description": "Session binding mode: 'process' (PID), 'policy' (hash), 'strict' (all)"
+        }
+      }
+    },
+    "ServerConfig": {
+      "type": "object",
+      "description": "HTTP server configuration for server-side validation (v1alpha2)",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable HTTP server for remote validation"
+        },
+        "listen": {
+          "type": "string",
+          "pattern": "^([a-zA-Z0-9.-]+|\\*)?:[0-9]+$",
+          "default": "127.0.0.1:9443",
+          "description": "Address and port to bind (e.g., '127.0.0.1:9443', ':9443')"
+        },
+        "tls": {
+          "$ref": "#/$defs/TLSConfig"
+        },
+        "endpoints": {
+          "$ref": "#/$defs/EndpointsConfig"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": { "const": true },
+          "listen": {
+            "not": {
+              "pattern": "^(127\\.0\\.0\\.1|localhost|::1):[0-9]+$"
+            }
+          }
+        },
+        "required": ["enabled", "listen"]
+      },
+      "then": {
+        "required": ["tls"],
+        "properties": {
+          "tls": {
+            "required": ["cert", "key"]
+          }
+        }
+      }
+    },
+    "TLSConfig": {
+      "type": "object",
+      "description": "TLS configuration for HTTPS",
+      "additionalProperties": false,
+      "properties": {
+        "cert": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to TLS certificate file (PEM format)"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to TLS private key file (PEM format)"
+        },
+        "client_ca": {
+          "type": "string",
+          "description": "Path to CA certificate for client verification (mTLS)"
+        },
+        "require_client_cert": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require client certificate (mTLS)"
+        }
+      }
+    },
+    "EndpointsConfig": {
+      "type": "object",
+      "description": "HTTP endpoint path configuration",
+      "additionalProperties": false,
+      "properties": {
+        "validate": {
+          "type": "string",
+          "pattern": "^/[a-zA-Z0-9/_-]*$",
+          "default": "/v1/validate",
+          "description": "Path for validation endpoint"
+        },
+        "health": {
+          "type": "string",
+          "pattern": "^/[a-zA-Z0-9/_-]*$",
+          "default": "/health",
+          "description": "Path for health check endpoint"
+        },
+        "metrics": {
+          "type": "string",
+          "pattern": "^/[a-zA-Z0-9/_-]*$",
+          "default": "/metrics",
+          "description": "Path for Prometheus metrics endpoint"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,313 @@
+name: "Token Validation Tests"
+description: "Tests for AIP identity token validation (v1alpha2)"
+api_version: "aip.io/v1alpha2"
+conformance_level: "identity"
+
+tests:
+  # Token Required Enforcement
+  - id: "validation-001"
+    description: "Request blocked when require_token is true and no token provided"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: require-token
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+      token: null  # No token provided
+    expected:
+      decision: "BLOCK"
+      error_code: -32008
+      error_message: "Token required"
+
+  - id: "validation-002"
+    description: "Request allowed when require_token is false and no token provided"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: token-optional
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: false
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+      token: null
+    expected:
+      decision: "ALLOW"
+
+  - id: "validation-003"
+    description: "Request allowed with valid token when require_token is true"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: valid-token-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+      token: "${VALID_TOKEN}"  # Valid token from previous issuance
+    expected:
+      decision: "ALLOW"
+
+  # Token Expiration
+  - id: "validation-010"
+    description: "Expired token is rejected"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: expiry-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+          token_ttl: "1s"  # Very short TTL for testing
+    sequence:
+      - action: "call"
+        wait: "0s"
+        input:
+          method: "tools/call"
+          tool: "read_file"
+          args:
+            path: "/tmp/test.txt"
+        expected:
+          decision: "ALLOW"
+        capture:
+          token: "issued_token"
+      - action: "call"
+        wait: "2s"  # After TTL
+        input:
+          method: "tools/call"
+          tool: "read_file"
+          args:
+            path: "/tmp/test.txt"
+          token: "${issued_token}"  # Use old token
+        expected:
+          decision: "BLOCK"
+          error_code: -32009
+          token_error: "token_expired"
+
+  # Policy Hash Validation
+  - id: "validation-020"
+    description: "Token rejected when policy hash doesn't match"
+    policy_sequence:
+      - step: "issue_token"
+        policy: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: policy-change-test
+          spec:
+            allowed_tools:
+              - tool_a
+            identity:
+              enabled: true
+              require_token: true
+      - step: "change_policy"
+        policy: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: policy-change-test
+          spec:
+            allowed_tools:
+              - tool_a
+              - tool_b  # Added tool - policy changed
+            identity:
+              enabled: true
+              require_token: true
+      - step: "use_old_token"
+        input:
+          method: "tools/call"
+          tool: "tool_a"
+          args: {}
+          token: "${token_from_step_1}"
+        expected:
+          decision: "BLOCK"
+          error_code: -32009
+          token_error: "policy_changed"
+
+  # Session Binding Validation
+  - id: "validation-030"
+    description: "Token rejected when session binding doesn't match (process mode)"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: binding-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+          session_binding: "process"
+    test_type: "cross_process"
+    steps:
+      - process: "A"
+        action: "issue_token"
+        capture:
+          token: "process_a_token"
+      - process: "B"  # Different process
+        action: "use_token"
+        input:
+          token: "${process_a_token}"
+        expected:
+          decision: "BLOCK"
+          error_code: -32009
+          token_error: "session_mismatch"
+
+  - id: "validation-031"
+    description: "Token accepted in same process (process mode)"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: same-process
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+          session_binding: "process"
+    test_type: "same_process"
+    steps:
+      - action: "issue_token"
+        capture:
+          token: "my_token"
+      - action: "use_token"
+        input:
+          token: "${my_token}"
+        expected:
+          decision: "ALLOW"
+
+  # Replay Detection
+  - id: "validation-040"
+    description: "Replay attack detected (same nonce reused)"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: replay-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+    test_type: "replay"
+    steps:
+      - action: "issue_token"
+        capture:
+          token: "original_token"
+      - action: "use_token"
+        input:
+          token: "${original_token}"
+        expected:
+          decision: "ALLOW"
+      - action: "replay_token"  # Attempt to reuse exact same token
+        input:
+          token: "${original_token}"
+        expected:
+          decision: "BLOCK"
+          error_code: -32009
+          token_error: "replay_detected"
+    note: "Implementation may use nonce tracking or other replay detection"
+
+  # Malformed Token
+  - id: "validation-050"
+    description: "Malformed token is rejected"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: malformed-test
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+      token: "not-a-valid-token-format"
+    expected:
+      decision: "BLOCK"
+      error_code: -32009
+      token_error: "malformed"
+
+  - id: "validation-051"
+    description: "Empty token is rejected when required"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: empty-token
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+    input:
+      method: "tools/call"
+      tool: "read_file"
+      args:
+        path: "/tmp/test.txt"
+      token: ""
+    expected:
+      decision: "BLOCK"
+      error_code: -32008
+
+  # Strict Binding Mode
+  - id: "validation-060"
+    description: "Strict binding validates all context"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: strict-binding
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+          session_binding: "strict"
+    test_type: "context_change"
+    note: |
+      Strict binding validates:
+      - Process ID
+      - Policy path
+      - Hostname
+      Any change should invalidate the token

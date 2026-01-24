@@ -1,0 +1,375 @@
+name: "Server Authentication Tests"
+description: "Tests for AIP server authentication and token enforcement (v1alpha2)"
+api_version: "aip.io/v1alpha2"
+conformance_level: "server"
+
+tests:
+  # Token Requirement Enforcement
+  - id: "auth-001"
+    description: "Request rejected without token when require_token is true"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: auth-required
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      # No Authorization header
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 401
+      body:
+        error: "token_required"
+
+  - id: "auth-002"
+    description: "Request accepted with valid Bearer token"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: auth-valid
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    setup:
+      - action: "get_valid_token"
+        capture:
+          token: "valid_token"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer ${valid_token}"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 200
+      body:
+        decision: "allow"
+
+  - id: "auth-003"
+    description: "Request rejected with invalid Bearer token"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: auth-invalid
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer invalid-token-12345"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 401
+      body:
+        error: "token_invalid"
+
+  - id: "auth-004"
+    description: "Request rejected with expired token"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: auth-expired
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+          token_ttl: "1s"
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    setup:
+      - action: "get_valid_token"
+        capture:
+          token: "soon_expired_token"
+      - action: "wait"
+        duration: "2s"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer ${soon_expired_token}"
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 401
+      body:
+        error: "token_invalid"
+        token_error: "token_expired"
+
+  # Authorization Header Formats
+  - id: "auth-010"
+    description: "Bearer scheme is required"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: bearer-required
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Basic dXNlcjpwYXNz"  # Basic auth, not Bearer
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+    expected:
+      http_status: 401
+      body:
+        error: "token_required"
+
+  - id: "auth-011"
+    description: "Token in request body is accepted"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: body-token
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    setup:
+      - action: "get_valid_token"
+        capture:
+          token: "valid_token"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      # No Authorization header
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+        token: "${valid_token}"  # Token in body instead
+    expected:
+      http_status: 200
+      body:
+        decision: "allow"
+
+  - id: "auth-012"
+    description: "Authorization header takes precedence over body token"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: header-precedence
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    setup:
+      - action: "get_valid_token"
+        capture:
+          token: "valid_token"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer invalid-token"  # Invalid in header
+      body:
+        tool: "read_file"
+        arguments:
+          path: "/tmp/test.txt"
+        token: "${valid_token}"  # Valid in body
+    expected:
+      http_status: 401  # Header takes precedence, which is invalid
+      body:
+        error: "token_invalid"
+
+  # Public Endpoints
+  - id: "auth-020"
+    description: "Health endpoint does not require authentication"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: health-public
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "GET"
+      path: "/health"
+      # No Authorization header
+    expected:
+      http_status: 200
+      body:
+        status: "healthy"
+
+  - id: "auth-021"
+    description: "Metrics endpoint does not require authentication"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: metrics-public
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "GET"
+      path: "/metrics"
+      # No Authorization header
+    expected:
+      http_status: 200
+
+  # Token Scope Restrictions
+  - id: "auth-030"
+    description: "Token is bound to specific agent policy"
+    policy_sequence:
+      - name: "policy-a"
+        content: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: agent-a
+          spec:
+            allowed_tools:
+              - tool_a
+            identity:
+              enabled: true
+              require_token: true
+            server:
+              enabled: true
+              listen: "127.0.0.1:9443"
+      - name: "policy-b"
+        content: |
+          apiVersion: aip.io/v1alpha2
+          kind: AgentPolicy
+          metadata:
+            name: agent-b
+          spec:
+            allowed_tools:
+              - tool_b
+            identity:
+              enabled: true
+              require_token: true
+            server:
+              enabled: true
+              listen: "127.0.0.1:9444"
+    steps:
+      - action: "load_policy"
+        policy: "policy-a"
+      - action: "get_valid_token"
+        capture:
+          token: "token_for_a"
+      - action: "load_policy"
+        policy: "policy-b"
+      - http_request:
+          method: "POST"
+          path: "/v1/validate"
+          port: 9444  # Policy B's server
+          headers:
+            Authorization: "Bearer ${token_for_a}"  # Token from Policy A
+          body:
+            tool: "tool_b"
+            arguments: {}
+        expected:
+          http_status: 401
+          body:
+            error: "token_invalid"
+            token_error: "policy_changed"
+
+  # Error Response Format
+  - id: "auth-040"
+    description: "Authentication errors include helpful details"
+    policy: |
+      apiVersion: aip.io/v1alpha2
+      kind: AgentPolicy
+      metadata:
+        name: error-details
+      spec:
+        allowed_tools:
+          - read_file
+        identity:
+          enabled: true
+          require_token: true
+        server:
+          enabled: true
+          listen: "127.0.0.1:9443"
+    http_request:
+      method: "POST"
+      path: "/v1/validate"
+      headers:
+        Authorization: "Bearer expired-token-xyz"
+      body:
+        tool: "read_file"
+        arguments: {}
+    expected:
+      http_status: 401
+      body:
+        error: "token_invalid"
+        # Should include token_error detail
+        token_error: "!null"
