@@ -54,6 +54,24 @@ The proxy intercepts `tools/call` requests, applies policy, and forwards allowed
 
 ## Security
 
+### How is AIP different from workforce AI governance tools like SurePath.ai?
+
+AIP and workforce AI governance tools solve different problems at different layers:
+
+**Workforce AI Governance (e.g., SurePath.ai)**:
+- Monitors *employee* AI usage across your organization
+- Network/application level visibility
+- Answers: "Who in my org is using ChatGPT? What are they asking?"
+- Typically SaaS platforms for compliance and governance
+
+**AIP (Agent Identity Protocol)**:
+- Controls *what actions AI agents can take* on your infrastructure
+- Tool-call level authorization (blocks dangerous operations)
+- Answers: "Can this agent delete files? Access production databases?"
+- Open protocol for developers building agents
+
+**These are complementary**: Use workforce governance to monitor employee AI usage. Use AIP to secure the agents those employees build. Think of it as different layers—one monitors people, one protects infrastructure.
+
 ### How is AIP different from OAuth?
 
 | Aspect | OAuth | AIP |

@@ -97,6 +97,60 @@ sequenceDiagram
 
 ---
 
+## How is AIP Different?
+
+### vs. Workforce AI Governance (e.g., SurePath.ai)
+
+AIP and workforce AI governance tools solve different problems at different layers:
+
+| Aspect | Workforce AI Governance | AIP |
+|--------|------------------------|-----|
+| **Focus** | Employee AI usage monitoring | Agent action authorization |
+| **Layer** | Network/application level | Tool-call level |
+| **Question** | "Who in my org is using AI?" | "What can my AI agents do?" |
+| **Deployment** | Typically SaaS | Open protocol, self-hosted |
+| **Use Case** | Audit employee ChatGPT usage | Block agent from deleting databases |
+
+**These are complementary**: Use workforce governance to monitor employee AI usage. Use AIP to secure the agents those employees build.
+
+### vs. OAuth / API Keys
+
+| Aspect | OAuth | AIP |
+|--------|-------|-----|
+| **Granularity** | Scope-level ("repo access") | Action-level ("repos.get with org:X") |
+| **Timing** | Grant-time | Runtime (every call) |
+| **Audience** | End users | Developers/Security teams |
+| **Format** | Token claims | YAML policy files |
+
+**OAuth answers "who is this?"** — AIP answers **"should this specific action be allowed?"**
+
+---
+
+## See It In Action
+
+When an agent attempts a dangerous operation, AIP blocks it immediately:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32001,
+    "message": "Permission Denied: Tool 'delete_database' is not allowed by policy"
+  }
+}
+```
+
+**What just happened?**
+1. Agent (possibly hijacked by prompt injection) tries to call `delete_database`
+2. AIP policy engine checks `allowed_tools` list
+3. Tool not found → Request blocked before reaching your infrastructure
+4. Attempt logged to audit trail for forensic analysis
+
+**Your database never received the request.** This is zero-trust authorization in action.
+
+---
+
 ## Quick Start
 
 Secure any MCP tool server in one command:
